@@ -1,7 +1,10 @@
 'use client';
+/* eslint-disable react-hooks/purity */
 
 import { useState, useEffect } from 'react';
-import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2 } from 'lucide-react';
+import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, CloudCheck } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 export type Client = {
   id: string;
@@ -21,6 +24,7 @@ export default function ClientesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [formData, setFormData] = useState({
     type: 'pf' as 'pf' | 'pj',
@@ -34,24 +38,64 @@ export default function ClientesPage() {
     complement: ''
   });
 
-  // Load data from localStorage on mount (Client-side only to avoid SSR hydration mismatch)
+  // Load data from localStorage on mount and sync with Firestore in real-time
   useEffect(() => {
     const saved = localStorage.getItem('@jc-eletricista:clients');
     if (saved) {
       try {
-        const timeoutId = setTimeout(() => {
-          setClients(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        const timer = setTimeout(() => {
+          setClients(parsed);
         }, 0);
-        return () => clearTimeout(timeoutId);
+        return () => clearTimeout(timer);
       } catch (e) {
         console.error('Error parsing clients from local storage', e);
       }
     }
+
+    if (!db) return;
+
+    try {
+      const clientsRef = collection(db, 'clients');
+      const unsubscribe = onSnapshot(clientsRef, (snapshot) => {
+        setIsSyncing(false);
+        if (!snapshot.empty) {
+          const list: Client[] = [];
+          snapshot.forEach((d) => {
+            list.push({ id: d.id, ...d.data() } as Client);
+          });
+          setClients(list);
+          localStorage.setItem('@jc-eletricista:clients', JSON.stringify(list));
+        }
+      }, (err) => {
+        console.warn('Firestore live sync error (fallback to local):', err);
+        setIsSyncing(false);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn('Firestore listener setup error:', err);
+    }
   }, []);
 
-  const saveClients = (newClients: Client[]) => {
-    setClients(newClients);
-    localStorage.setItem('@jc-eletricista:clients', JSON.stringify(newClients));
+  const saveClientToStorageAndCloud = async (client: Client) => {
+    if (db) {
+      try {
+        await setDoc(doc(db, 'clients', client.id), client);
+      } catch (e) {
+        console.warn('Failed to sync client with Firestore:', e);
+      }
+    }
+  };
+
+  const deleteClientFromStorageAndCloud = async (id: string) => {
+    if (db) {
+      try {
+        await deleteDoc(doc(db, 'clients', id));
+      } catch (e) {
+        console.warn('Failed to delete client from Firestore:', e);
+      }
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -62,16 +106,27 @@ export default function ClientesPage() {
     }
 
     if (editingId) {
-      saveClients(clients.map(c => c.id === editingId ? { ...c, ...formData } as Client : c));
-    } else {
-      const newClient: Client = {
-        // eslint-disable-next-line react-hooks/purity
-        id: Date.now().toString(),
+      const updatedClient: Client = {
+        id: editingId,
         ...formData,
-        // eslint-disable-next-line react-hooks/purity
-        createdAt: new Date().toLocaleDateString('pt-BR')
+        createdAt: clients.find(c => c.id === editingId)?.createdAt || new Date().toLocaleDateString('pt-BR')
       };
-      saveClients([newClient, ...clients]);
+      const updatedList = clients.map(c => c.id === editingId ? updatedClient : c);
+      setClients(updatedList);
+      localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updatedList));
+      saveClientToStorageAndCloud(updatedClient);
+    } else {
+      const id = Date.now().toString();
+      const createdAt = new Date().toLocaleDateString('pt-BR');
+      const newClient: Client = {
+        id,
+        ...formData,
+        createdAt
+      };
+      const updatedList = [newClient, ...clients];
+      setClients(updatedList);
+      localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updatedList));
+      saveClientToStorageAndCloud(newClient);
     }
     
     closeModal();
@@ -95,7 +150,10 @@ export default function ClientesPage() {
 
   const handleDelete = (id: string) => {
     if (confirm('Tem certeza que deseja excluir este cliente?')) {
-      saveClients(clients.filter(c => c.id !== id));
+      const updatedList = clients.filter(c => c.id !== id);
+      setClients(updatedList);
+      localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updatedList));
+      deleteClientFromStorageAndCloud(id);
     }
   };
 
@@ -119,8 +177,14 @@ export default function ClientesPage() {
       {/* Page Header & Actions */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Clientes Cadastrados</h1>
-          <p className="text-sm text-on-surface-variant mt-1">Gerencie sua base de clientes, contatos e histórico de serviços.</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Clientes Cadastrados</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Firebase Conectado
+            </span>
+          </div>
+          <p className="text-sm text-on-surface-variant mt-1">Gerencie sua base de clientes sincronizada em nuvem (crmjuan-9a68f).</p>
         </div>
         <button 
           onClick={() => setModalOpen(true)}

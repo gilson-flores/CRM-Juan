@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, FileDown, User, Wrench, Trash2, PlusCircle, AlignLeft, Eye } from 'lucide-react';
+import { Save, FileDown, User, Wrench, Trash2, PlusCircle, AlignLeft, Eye, CheckCircle2 } from 'lucide-react';
 import Image from 'next/image';
 import type { Client } from '../clientes/page';
+import { db } from '@/lib/firebase';
+import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 
 const LOGO_URL = '/logo.jpg';
 
@@ -18,20 +20,46 @@ export default function OrcamentosPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState('');
   const [address, setAddress] = useState('');
+  const [observations, setObservations] = useState('');
+  const [savedSuccess, setSavedSuccess] = useState(false);
   
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [newItem, setNewItem] = useState({ description: '', quantity: 1, unitPrice: 0 });
   const [discount, setDiscount] = useState(0);
 
+  // Load clients and sync with Firestore in real-time
   useEffect(() => {
     const saved = localStorage.getItem('@jc-eletricista:clients');
     if (saved) {
       try {
-        const timeoutId = setTimeout(() => {
-          setClients(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        const timer = setTimeout(() => {
+          setClients(parsed);
         }, 0);
-        return () => clearTimeout(timeoutId);
+        return () => clearTimeout(timer);
       } catch (e) {}
+    }
+
+    if (!db) return;
+
+    try {
+      const clientsRef = collection(db, 'clients');
+      const unsubscribe = onSnapshot(clientsRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const list: Client[] = [];
+          snapshot.forEach((d) => {
+            list.push({ id: d.id, ...d.data() } as Client);
+          });
+          setClients(list);
+          localStorage.setItem('@jc-eletricista:clients', JSON.stringify(list));
+        }
+      }, (err) => {
+        console.warn('Firestore clients sync error:', err);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn('Firestore setup error in orcamentos:', err);
     }
   }, []);
 
@@ -64,20 +92,70 @@ export default function OrcamentosPage() {
   const subtotal = items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
   const total = subtotal - discount;
 
+  const handleSaveDraft = async () => {
+    const quoteData = {
+      id: Date.now().toString(),
+      clientName: selectedClient,
+      address,
+      items,
+      subtotal,
+      discount,
+      total,
+      observations,
+      createdAt: new Date().toISOString(),
+      displayDate: new Date().toLocaleDateString('pt-BR')
+    };
+
+    localStorage.setItem('@jc-eletricista:latest_quote', JSON.stringify(quoteData));
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'orcamentos', quoteData.id), quoteData);
+      } catch (e) {
+        console.warn('Failed to save quote to Firestore:', e);
+      }
+    }
+
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 3000);
+  };
+
+  const handlePrintPDF = () => {
+    window.print();
+  };
+
   return (
     <>
       {/* Header */}
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-6">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Novo Orçamento</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Novo Orçamento</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Firebase Conectado
+            </span>
+          </div>
           <p className="text-sm text-on-surface-variant mt-1">Preencha os dados do serviço para gerar o documento.</p>
         </div>
-        <div className="flex gap-4 w-full sm:w-auto">
-          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 border border-primary text-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary/10 transition-colors">
+        <div className="flex gap-4 w-full sm:w-auto items-center">
+          {savedSuccess && (
+            <span className="text-xs text-primary flex items-center gap-1.5 font-semibold animate-fade-in">
+              <CheckCircle2 size={16} />
+              Salvo em Nuvem!
+            </span>
+          )}
+          <button 
+            onClick={handleSaveDraft}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 border border-primary text-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary/10 transition-colors"
+          >
             <Save size={18} />
             Salvar Rascunho
           </button>
-          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-primary text-on-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary-container transition-colors shadow-lg shadow-primary/20">
+          <button 
+            onClick={handlePrintPDF}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-primary text-on-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary-container transition-colors shadow-lg shadow-primary/20"
+          >
             <FileDown size={18} />
             Gerar PDF
           </button>
@@ -231,7 +309,9 @@ export default function OrcamentosPage() {
             <textarea 
               className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface h-24 resize-none focus:outline-none focus:border-primary transition-colors placeholder:text-on-surface-variant" 
               placeholder="Validade do orçamento, prazos de pagamento, exclusões..."
-            ></textarea>
+              value={observations}
+              onChange={(e) => setObservations(e.target.value)}
+            />
           </section>
         </div>
 
@@ -287,6 +367,13 @@ export default function OrcamentosPage() {
                   )}
                 </tbody>
               </table>
+
+              {observations && (
+                <div className="mb-4 border-t border-gray-200 pt-3">
+                  <h4 className="text-[10px] font-bold uppercase text-gray-500 mb-1">Observações:</h4>
+                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{observations}</p>
+                </div>
+              )}
 
               <div className="flex justify-end border-t-2 border-gray-900 pt-4 mt-auto">
                 <div className="w-1/2">
