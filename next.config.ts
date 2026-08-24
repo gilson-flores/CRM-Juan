@@ -1,7 +1,9 @@
 import type {NextConfig} from 'next';
 
+const isGithubActions = process.env.GITHUB_ACTIONS === 'true';
+
 const nextConfig: NextConfig = {
-  basePath: '/CRM-Juan',
+  basePath: isGithubActions ? '/CRM-Juan' : undefined,
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
