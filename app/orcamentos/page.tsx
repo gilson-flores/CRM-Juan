@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, FileDown, User, Wrench, Trash2, PlusCircle, AlignLeft, Eye, CheckCircle2 } from 'lucide-react';
+import { Save, FileDown, User, Wrench, Trash2, PlusCircle, AlignLeft, Eye, Cloud } from 'lucide-react';
 import Image from 'next/image';
 import type { Client } from '../clientes/page';
-import { db } from '@/lib/firebase';
-import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 
 const LOGO_URL = '/logo.jpg';
 
@@ -16,50 +15,38 @@ type QuoteItem = {
   unitPrice: number;
 };
 
+type DraftQuote = {
+  id: string;
+  clientName: string;
+  total: number;
+  date: string;
+  itemsStr: string;
+}
+
 export default function OrcamentosPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState('');
   const [address, setAddress] = useState('');
-  const [observations, setObservations] = useState('');
-  const [savedSuccess, setSavedSuccess] = useState(false);
   
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [newItem, setNewItem] = useState({ description: '', quantity: 1, unitPrice: 0 });
   const [discount, setDiscount] = useState(0);
 
-  // Load clients and sync with Firestore in real-time
+  const { token, spreadsheetId, syncDataToSheets } = useGoogleSheets();
+  const [drafts, setDrafts] = useState<DraftQuote[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   useEffect(() => {
     const saved = localStorage.getItem('@jc-eletricista:clients');
+    const savedDrafts = localStorage.getItem('@jc-eletricista:drafts');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        const timer = setTimeout(() => {
-          setClients(parsed);
+        const timeoutId = setTimeout(() => {
+          setClients(JSON.parse(saved));
+          if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
         }, 0);
-        return () => clearTimeout(timer);
+        return () => clearTimeout(timeoutId);
       } catch (e) {}
-    }
-
-    if (!db) return;
-
-    try {
-      const clientsRef = collection(db, 'clients');
-      const unsubscribe = onSnapshot(clientsRef, (snapshot) => {
-        if (!snapshot.empty) {
-          const list: Client[] = [];
-          snapshot.forEach((d) => {
-            list.push({ id: d.id, ...d.data() } as Client);
-          });
-          setClients(list);
-          localStorage.setItem('@jc-eletricista:clients', JSON.stringify(list));
-        }
-      }, (err) => {
-        console.warn('Firestore clients sync error:', err);
-      });
-
-      return () => unsubscribe();
-    } catch (err) {
-      console.warn('Firestore setup error in orcamentos:', err);
     }
   }, []);
 
@@ -93,35 +80,35 @@ export default function OrcamentosPage() {
   const total = subtotal - discount;
 
   const handleSaveDraft = async () => {
-    const quoteData = {
-      id: Date.now().toString(),
-      clientName: selectedClient,
-      address,
-      items,
-      subtotal,
-      discount,
-      total,
-      observations,
-      createdAt: new Date().toISOString(),
-      displayDate: new Date().toLocaleDateString('pt-BR')
-    };
-
-    localStorage.setItem('@jc-eletricista:latest_quote', JSON.stringify(quoteData));
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'orcamentos', quoteData.id), quoteData);
-      } catch (e) {
-        console.warn('Failed to save quote to Firestore:', e);
-      }
+    if (!selectedClient || items.length === 0) {
+      alert('Selecione um cliente e adicione itens antes de salvar.');
+      return;
     }
 
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
-  };
+    setIsSyncing(true);
+    
+    const newDraft: DraftQuote = {
+      id: Date.now().toString(),
+      clientName: selectedClient,
+      total,
+      date: new Date().toLocaleDateString('pt-BR'),
+      itemsStr: items.map(i => `${i.quantity}x ${i.description}`).join(', ')
+    };
+    
+    const newDrafts = [newDraft, ...drafts];
+    setDrafts(newDrafts);
+    localStorage.setItem('@jc-eletricista:drafts', JSON.stringify(newDrafts));
 
-  const handlePrintPDF = () => {
-    window.print();
+    if (token && spreadsheetId) {
+      const sheetData = [
+        ['ID', 'Cliente', 'Data', 'Itens', 'Total'],
+        ...newDrafts.map(d => [d.id, d.clientName, d.date, d.itemsStr, d.total.toString()])
+      ];
+      await syncDataToSheets('Orcamentos', sheetData);
+    }
+    
+    setIsSyncing(false);
+    alert('Orçamento salvo com sucesso!');
   };
 
   return (
@@ -129,33 +116,19 @@ export default function OrcamentosPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-6">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Novo Orçamento</h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              Firebase Conectado
-            </span>
-          </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Novo Orçamento</h1>
           <p className="text-sm text-on-surface-variant mt-1">Preencha os dados do serviço para gerar o documento.</p>
         </div>
-        <div className="flex gap-4 w-full sm:w-auto items-center">
-          {savedSuccess && (
-            <span className="text-xs text-primary flex items-center gap-1.5 font-semibold animate-fade-in">
-              <CheckCircle2 size={16} />
-              Salvo em Nuvem!
-            </span>
-          )}
+        <div className="flex gap-4 w-full sm:w-auto">
           <button 
             onClick={handleSaveDraft}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 border border-primary text-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary/10 transition-colors"
+            disabled={isSyncing}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 border border-primary text-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary/10 transition-colors disabled:opacity-50"
           >
-            <Save size={18} />
-            Salvar Rascunho
+            {isSyncing ? <Cloud size={18} className="animate-pulse" /> : <Save size={18} />}
+            {isSyncing ? 'Sincronizando...' : 'Salvar Rascunho'}
           </button>
-          <button 
-            onClick={handlePrintPDF}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-primary text-on-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary-container transition-colors shadow-lg shadow-primary/20"
-          >
+          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-primary text-on-primary px-4 py-2 rounded text-[11px] font-bold uppercase tracking-wider hover:bg-primary-container transition-colors shadow-lg shadow-primary/20">
             <FileDown size={18} />
             Gerar PDF
           </button>
@@ -309,9 +282,7 @@ export default function OrcamentosPage() {
             <textarea 
               className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface h-24 resize-none focus:outline-none focus:border-primary transition-colors placeholder:text-on-surface-variant" 
               placeholder="Validade do orçamento, prazos de pagamento, exclusões..."
-              value={observations}
-              onChange={(e) => setObservations(e.target.value)}
-            />
+            ></textarea>
           </section>
         </div>
 
@@ -331,8 +302,8 @@ export default function OrcamentosPage() {
             <div className="flex-1 bg-[#f8f9fa] p-6 overflow-y-auto m-4 rounded shadow-inner text-gray-900 border border-gray-300 select-none">
               
               <div className="flex items-center justify-between border-b-2 border-gray-900 pb-4 mb-4">
-                <div className="w-36 h-20 bg-black rounded p-1 flex items-center justify-center relative overflow-hidden">
-                  <Image src={LOGO_URL} alt="Logo" fill className="object-contain" referrerPolicy="no-referrer" />
+                <div className="w-32 h-16 bg-gray-200 flex items-center justify-center relative overflow-hidden">
+                  <Image src={LOGO_URL} alt="Logo" fill className="object-contain mix-blend-multiply" referrerPolicy="no-referrer" />
                 </div>
                 <div className="text-right">
                   <h1 className="text-xl font-black uppercase text-gray-900 tracking-tighter">Orçamento</h1>
@@ -367,13 +338,6 @@ export default function OrcamentosPage() {
                   )}
                 </tbody>
               </table>
-
-              {observations && (
-                <div className="mb-4 border-t border-gray-200 pt-3">
-                  <h4 className="text-[10px] font-bold uppercase text-gray-500 mb-1">Observações:</h4>
-                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{observations}</p>
-                </div>
-              )}
 
               <div className="flex justify-end border-t-2 border-gray-900 pt-4 mt-auto">
                 <div className="w-1/2">

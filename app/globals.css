@@ -54,7 +54,7 @@
 }
 
 body {
-  background-color: #000000;
+  background-color: var(--color-background);
   color: var(--color-on-surface);
   font-family: var(--font-inter);
 }

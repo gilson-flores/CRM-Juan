@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "JC Eletricista CRM",
+  "description": "Sistema de gestão para serviços elétricos (Client-side).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
