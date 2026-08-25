@@ -18,6 +18,14 @@ export type Client = {
   createdAt: string;
 };
 
+function generateNewClient(formData: Omit<Client, 'id' | 'createdAt'>): Client {
+  return {
+    id: `${Date.now()}`,
+    ...formData,
+    createdAt: new Date().toLocaleDateString('pt-BR')
+  };
+}
+
 export default function ClientesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
@@ -78,13 +86,7 @@ export default function ClientesPage() {
     if (editingId) {
       saveClients(clients.map(c => c.id === editingId ? { ...c, ...formData } as Client : c));
     } else {
-      const newClient: Client = {
-        // eslint-disable-next-line react-hooks/purity
-        id: Date.now().toString(),
-        ...formData,
-        // eslint-disable-next-line react-hooks/purity
-        createdAt: new Date().toLocaleDateString('pt-BR')
-      };
+      const newClient = generateNewClient(formData);
       saveClients([newClient, ...clients]);
     }
     

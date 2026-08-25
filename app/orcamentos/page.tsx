@@ -6,7 +6,7 @@ import Image from 'next/image';
 import type { Client } from '../clientes/page';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 
-const LOGO_URL = '/logo.jpg';
+const LOGO_URL = '/logo.svg';
 
 type QuoteItem = {
   id: string;

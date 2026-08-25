@@ -12,10 +12,14 @@ export function useGoogleSheets() {
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if there is a saved spreadsheet ID
-    const savedId = localStorage.getItem('@jc-eletricista:spreadsheetId');
-    if (savedId) setSpreadsheetId(savedId);
-    setIsInitializing(false);
+    const timer = setTimeout(() => {
+      // Check if there is a saved spreadsheet ID
+      const savedId = localStorage.getItem('@jc-eletricista:spreadsheetId');
+      if (savedId) setSpreadsheetId(savedId);
+      setIsInitializing(false);
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const login = useCallback(() => {
