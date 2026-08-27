@@ -20,7 +20,12 @@ import {
   X, 
   Save, 
   RotateCcw,
-  Check
+  Check,
+  Copy,
+  Key,
+  ShieldAlert,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { useGoogleSheets, CatalogItem, DEFAULT_CATALOG_ITEMS } from '@/hooks/useGoogleSheets';
 
@@ -35,7 +40,10 @@ export default function ConfiguracoesPage() {
     lastError, 
     syncAllData, 
     createSpreadsheet,
-    syncDataToSheets
+    syncDataToSheets,
+    activeClientId,
+    customClientId,
+    saveCustomClientId
   } = useGoogleSheets();
 
   const [activeTab, setActiveTab] = useState<'integracao' | 'itens'>('itens');
@@ -56,6 +64,23 @@ export default function ConfiguracoesPage() {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+
+  // Configuração OAuth / Origem
+  const [currentOrigin, setCurrentOrigin] = useState('');
+  const [copiedOrigin, setCopiedOrigin] = useState(false);
+  const [showOAuthHelp, setShowOAuthHelp] = useState(true);
+  const [clientIdInput, setClientIdInput] = useState('');
+  const [savedClientIdMsg, setSavedClientIdMsg] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        setCurrentOrigin(window.location.origin);
+      }
+      setClientIdInput(customClientId || activeClientId || '');
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [customClientId, activeClientId]);
 
   // Carregar catálogo de itens do LocalStorage
   useEffect(() => {
@@ -404,6 +429,130 @@ export default function ConfiguracoesPage() {
                 </div>
               </div>
             )}
+
+            {/* Diagnostic & Origin URL Box */}
+            <div className="bg-[#141418] border border-[#27272e] rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Key size={16} className="text-[#FF7A00]" />
+                  <span className="text-xs font-bold text-white">URL de Origem do Aplicativo</span>
+                </div>
+                <span className="text-[11px] text-zinc-400">Origem necessária nas credenciais do Google Cloud</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={currentOrigin}
+                  className="w-full bg-[#0a0a0c] border border-[#2b2b32] text-xs font-mono text-zinc-300 rounded-lg px-3 py-2 select-all focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentOrigin) {
+                      navigator.clipboard.writeText(currentOrigin);
+                      setCopiedOrigin(true);
+                      setTimeout(() => setCopiedOrigin(false), 3000);
+                    }
+                  }}
+                  className="bg-[#242429] hover:bg-[#2f2f38] text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-zinc-700 shrink-0"
+                >
+                  {copiedOrigin ? (
+                    <>
+                      <Check size={14} className="text-emerald-400" />
+                      <span className="text-emerald-400">Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Copiar URL</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* OAuth Troubleshooting Accordion */}
+            <div className="border border-[#26262e] rounded-xl overflow-hidden bg-[#121216]">
+              <button
+                type="button"
+                onClick={() => setShowOAuthHelp(!showOAuthHelp)}
+                className="w-full p-4 text-left flex items-center justify-between hover:bg-[#18181f] transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldAlert size={18} className="text-[#FF7A00]" />
+                  <div>
+                    <h3 className="text-xs font-bold text-white">Como resolver o &quot;Erro 400: origin_mismatch&quot; (Passo a Passo)</h3>
+                    <p className="text-[11px] text-zinc-400">O Google exige que a URL do aplicativo esteja autorizada no Console do Google Cloud.</p>
+                  </div>
+                </div>
+                {showOAuthHelp ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+              </button>
+
+              {showOAuthHelp && (
+                <div className="p-4 pt-0 border-t border-[#1e1e24] text-xs text-zinc-300 space-y-3">
+                  <ol className="list-decimal list-inside space-y-2 text-zinc-300 pl-1 mt-3">
+                    <li>
+                      Acesse o <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-[#FF7A00] underline font-medium inline-flex items-center gap-1">Console do Google Cloud <ExternalLink size={12} /></a>.
+                    </li>
+                    <li>
+                      Selecione o seu projeto e vá em <strong>APIs e Serviços &gt; Credenciais</strong>.
+                    </li>
+                    <li>
+                      Na seção <strong>IDs do cliente OAuth 2.0</strong>, clique no nome do seu cliente Web.
+                    </li>
+                    <li>
+                      Em <strong>&quot;Origens JavaScript autorizadas&quot;</strong>, clique em <strong>+ Adicionar URI</strong> e cole a URL de origem acima:
+                      <div className="mt-1 p-2 bg-[#09090b] rounded border border-zinc-800 font-mono text-[11px] text-[#FF7A00] select-all">
+                        {currentOrigin || 'https://seu-dominio.run.app'}
+                      </div>
+                    </li>
+                    <li>
+                      Em <strong>&quot;URIs de redirecionamento autorizados&quot;</strong>, adicione também a mesma URL caso solicitado.
+                    </li>
+                    <li>
+                      Clique em <strong>Salvar</strong> no final da página. (O Google pode levar cerca de 1 a 5 minutos para propagar a autorização).
+                    </li>
+                    <li>
+                      Se você utiliza o Firebase Authentication, acesse o <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-[#FF7A00] underline font-medium inline-flex items-center gap-1">Console do Firebase <ExternalLink size={12} /></a> &gt; <strong>Authentication</strong> &gt; <strong>Configurações</strong> &gt; <strong>Domínios autorizados</strong> e adicione o domínio.
+                    </li>
+                  </ol>
+
+                  {/* Custom Client ID Configuration */}
+                  <div className="mt-4 pt-4 border-t border-[#222228] space-y-2">
+                    <label className="block text-xs font-semibold text-zinc-300">
+                      ID de Cliente OAuth 2.0 Personalizado (Opcional):
+                    </label>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ex: 537464647009-xxx.apps.googleusercontent.com"
+                        value={clientIdInput}
+                        onChange={(e) => setClientIdInput(e.target.value)}
+                        className="flex-1 bg-[#0a0a0c] border border-[#2b2b32] text-xs font-mono text-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:border-[#FF7A00]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          saveCustomClientId(clientIdInput);
+                          setSavedClientIdMsg(true);
+                          setTimeout(() => setSavedClientIdMsg(false), 3000);
+                        }}
+                        className="bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-md shadow-[#FF7A00]/20 shrink-0"
+                      >
+                        Salvar Client ID
+                      </button>
+                    </div>
+                    {savedClientIdMsg && (
+                      <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                        <Check size={14} /> Client ID salvo com sucesso!
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {token ? (
               <div className="bg-[#141418] border border-emerald-500/30 rounded-xl p-5 space-y-4">

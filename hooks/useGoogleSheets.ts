@@ -346,32 +346,47 @@ export function useGoogleSheets() {
     } catch (firebaseErr: any) {
       console.warn('Firebase signInWithPopup fallback to Google GSI:', firebaseErr);
       
+      const errorCode = firebaseErr?.code || '';
+      const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+      
       const currentClientId = (localStorage.getItem('@jc-eletricista:clientId') || activeClientId || '').trim();
       if (!currentClientId) {
-        setLastError('ID de cliente OAuth não encontrado.');
+        setLastError(`ID de cliente OAuth não configurado. Adicione o Client ID do Google Cloud nas configurações.`);
         return;
       }
 
       if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
-        setLastError('Aguardando carregamento dos scripts do Google. Tente novamente em 2 segundos.');
+        if (errorCode === 'auth/unauthorized-domain') {
+          setLastError(`Domínio não autorizado no Firebase (${currentOrigin}). Adicione esta URL em Firebase Console > Authentication > Configurações > Domínios Autorizados, ou configure as Origens JavaScript no Google Cloud Console.`);
+        } else {
+          setLastError('Aguardando carregamento da biblioteca do Google. Tente novamente em alguns segundos.');
+        }
         return;
       }
 
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: currentClientId,
-        scope: SCOPES,
-        callback: async (response: any) => {
-          if (response.error !== undefined) {
-            console.error('OAuth callback error:', response);
-            setLastError(response.error_description || response.error || 'Erro na autenticação');
-            return;
-          }
-          setToken(response.access_token);
-          setAccessToken(response.access_token);
-          await syncAllData(response.access_token);
-        },
-      });
-      client.requestAccessToken();
+      try {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: currentClientId,
+          scope: SCOPES,
+          callback: async (response: any) => {
+            if (response.error !== undefined) {
+              console.error('OAuth callback error:', response);
+              if (response.error === 'origin_mismatch' || response.error_description?.includes('origin_mismatch')) {
+                setLastError(`Erro 400 (origin_mismatch): A URL "${currentOrigin}" precisa ser adicionada em "Origens JavaScript autorizadas" no Google Cloud Console.`);
+              } else {
+                setLastError(response.error_description || response.error || 'Erro na autenticação com Google.');
+              }
+              return;
+            }
+            setToken(response.access_token);
+            setAccessToken(response.access_token);
+            await syncAllData(response.access_token);
+          },
+        });
+        client.requestAccessToken();
+      } catch (gsiErr: any) {
+        setLastError(gsiErr.message || 'Erro ao inicializar autenticação com o Google.');
+      }
     }
   }, [activeClientId, syncAllData]);
 
