@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2 } from 'lucide-react';
+import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 
 export type Client = {
@@ -58,7 +58,20 @@ export default function ClientesPage() {
     }
   }, []);
 
-  const { token, spreadsheetId, syncDataToSheets } = useGoogleSheets();
+  const { token, spreadsheetId, syncDataToSheets, syncAllData } = useGoogleSheets();
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await syncAllData();
+      alert('Clientes sincronizados com a Planilha Google com sucesso!');
+    } catch (e: any) {
+      alert('Erro na sincronização: ' + e.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const saveClients = (newClients: Client[]) => {
     setClients(newClients);
@@ -138,13 +151,39 @@ export default function ClientesPage() {
           <h1 className="text-2xl md:text-3xl font-bold text-on-surface">Clientes Cadastrados</h1>
           <p className="text-sm text-on-surface-variant mt-1">Gerencie sua base de clientes, contatos e histórico de serviços.</p>
         </div>
-        <button 
-          onClick={() => setModalOpen(true)}
-          className="bg-primary hover:bg-primary-container text-on-primary text-xs font-bold uppercase tracking-wider py-2 px-4 rounded transition-colors flex items-center gap-2 shadow-sm whitespace-nowrap"
-        >
-          <UserPlus size={18} />
-          Novo Cliente
-        </button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {token && spreadsheetId && (
+            <a
+              href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="bg-[#18181c] hover:bg-[#242429] border border-emerald-500/40 text-emerald-400 text-xs font-bold py-2 px-3 rounded-lg flex items-center gap-1.5 transition-all"
+            >
+              <ExternalLink size={14} />
+              Planilha Google
+            </a>
+          )}
+
+          {token && (
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="bg-[#18181c] hover:bg-[#242429] border border-[#2d2d34] text-zinc-300 hover:text-white text-xs font-bold py-2 px-3 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isSyncing ? 'animate-spin text-[#FF7A00]' : 'text-[#FF7A00]'} />
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+            </button>
+          )}
+
+          <button 
+            onClick={() => setModalOpen(true)}
+            className="bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-bold uppercase tracking-wider py-2.5 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-[#FF7A00]/20 whitespace-nowrap"
+          >
+            <UserPlus size={18} />
+            Novo Cliente
+          </button>
+        </div>
       </div>
 
       {/* Bento Grid Metrics */}
