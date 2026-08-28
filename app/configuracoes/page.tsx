@@ -25,25 +25,19 @@ import {
   Key,
   ShieldAlert,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download
 } from 'lucide-react';
-import { useGoogleSheets, CatalogItem, DEFAULT_CATALOG_ITEMS } from '@/hooks/useGoogleSheets';
+import { useGoogleSheets, CatalogItem, DEFAULT_CATALOG_ITEMS, APPS_SCRIPT_TEMPLATE } from '@/hooks/useGoogleSheets';
 
 export default function ConfiguracoesPage() {
   const { 
-    login, 
-    logout, 
-    token, 
-    user, 
-    spreadsheetId, 
-    isCreatingSpreadsheet, 
-    lastError, 
+    webAppUrl,
     syncAllData, 
-    createSpreadsheet,
-    syncDataToSheets,
-    activeClientId,
-    customClientId,
-    saveCustomClientId
+    saveWebAppUrl,
+    testWebAppConnection,
+    importAllFromSheets,
+    isConnected
   } = useGoogleSheets();
 
   const [activeTab, setActiveTab] = useState<'integracao' | 'itens'>('itens');
@@ -65,22 +59,22 @@ export default function ConfiguracoesPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
-  // Configuração OAuth / Origem
-  const [currentOrigin, setCurrentOrigin] = useState('');
-  const [copiedOrigin, setCopiedOrigin] = useState(false);
-  const [showOAuthHelp, setShowOAuthHelp] = useState(true);
-  const [clientIdInput, setClientIdInput] = useState('');
-  const [savedClientIdMsg, setSavedClientIdMsg] = useState(false);
+  // Apps Script Web App State
+  const [webAppInput, setWebAppInput] = useState('');
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Configuração
+  const [showScriptCode, setShowScriptCode] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (typeof window !== 'undefined') {
-        setCurrentOrigin(window.location.origin);
-      }
-      setClientIdInput(customClientId || activeClientId || '');
+      setWebAppInput(webAppUrl || '');
     }, 0);
     return () => clearTimeout(timer);
-  }, [customClientId, activeClientId]);
+  }, [webAppUrl]);
 
   // Carregar catálogo de itens do LocalStorage
   useEffect(() => {
@@ -104,14 +98,8 @@ export default function ConfiguracoesPage() {
     localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(items));
     
     // Se conectado, sincroniza a aba Catalogo_Itens na Planilha Google
-    if (token && spreadsheetId) {
-      const catalogRows = [
-        ['ID', 'Nome / Descrição do Item', 'Categoria', 'Unidade', 'Preço Padrão (R$)', 'Observação', 'Data de Cadastro'],
-        ...items.map(c => [
-          c.id, c.name, c.category, c.unit, c.unitPrice.toString(), c.description || '', c.createdAt || ''
-        ])
-      ];
-      await syncDataToSheets('Catalogo_Itens', catalogRows);
+    if (isConnected) {
+      syncAllData().catch(err => console.warn('Failed to sync to sheets:', err));
     }
   };
 
@@ -181,40 +169,6 @@ export default function ConfiguracoesPage() {
   const handleResetDefaultCatalog = async () => {
     if (confirm('Restaurar os itens padrão do catálogo de eletricista?')) {
       await saveCatalogItems(DEFAULT_CATALOG_ITEMS);
-    }
-  };
-
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    setSyncStatusMsg(null);
-    try {
-      const ok = await syncAllData();
-      if (ok) {
-        setSyncStatusMsg('Todos os clientes, orçamentos e itens foram sincronizados com sucesso na sua Planilha Google!');
-      } else {
-        setSyncStatusMsg('Faça login primeiro para sincronizar.');
-      }
-    } catch (err: any) {
-      setSyncStatusMsg('Erro ao sincronizar: ' + err.message);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleCreateNewSpreadsheet = async () => {
-    setIsSyncing(true);
-    setSyncStatusMsg(null);
-    try {
-      const id = await createSpreadsheet();
-      if (id) {
-        setSyncStatusMsg('Planilha criada com sucesso no seu Google Drive com as abas Clientes, Orcamentos, Itens e Catalogo_Itens!');
-      } else {
-        setSyncStatusMsg('Não foi possível criar a planilha. Verifique a conexão com o Google.');
-      }
-    } catch (err: any) {
-      setSyncStatusMsg('Erro: ' + err.message);
-    } finally {
-      setIsSyncing(false);
     }
   };
 
@@ -387,260 +341,202 @@ export default function ConfiguracoesPage() {
       {/* TAB 2: GOOGLE SHEETS & NUVEM */}
       {activeTab === 'integracao' && (
         <div className="space-y-6">
+          {/* MÉTODO 1: GOOGLE APPS SCRIPT WEB APP (DIRETO E DEFINITIVO) */}
           <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl shadow-black/50 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-[#18181c] border border-[#2d2d32] rounded-xl text-[#FF7A00]">
-                  <Cloud size={28} />
+                  <FileSpreadsheet size={28} />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-white">Google Sheets & Google Drive</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-white">Conexão Direta com Planilha Google</h2>
+                    <span className="px-2 py-0.5 bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/30 rounded text-[10px] font-bold uppercase">
+                      Recomendado
+                    </span>
+                  </div>
                   <p className="text-xs text-zinc-400">
-                    {token ? `Conectado como ${user?.email || 'Usuário Google'}` : 'Conecte sua conta Google para salvar tudo em tempo real.'}
+                    Sincronização 100% direta, sem erro de autorização de domínio ou telas de bloqueio.
                   </p>
                 </div>
               </div>
-              {token ? (
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-full flex items-center gap-1.5">
-                    <CheckCircle size={14} /> Conectado
-                  </span>
-                  <button 
-                    onClick={logout}
-                    title="Desconectar"
-                    className="p-1.5 text-zinc-400 hover:text-red-400 bg-[#18181c] hover:bg-[#222228] border border-[#2d2d34] rounded-lg transition-colors"
-                  >
-                    <LogOut size={15} />
-                  </button>
-                </div>
+              {webAppUrl ? (
+                <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-full flex items-center gap-1.5 w-fit">
+                  <CheckCircle size={14} /> Web App Ativo
+                </span>
               ) : (
                 <span className="px-3 py-1 bg-zinc-800 text-zinc-400 text-xs font-bold rounded-full w-fit">
-                  Desconectado
+                  Não Configurado
                 </span>
               )}
             </div>
 
-            {lastError && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3 text-red-400 text-xs">
-                <AlertCircle size={18} className="shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Atenção ao conectar:</p>
-                  <p className="mt-0.5 text-red-300">{lastError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Diagnostic & Origin URL Box */}
+            {/* URL Input & Controls */}
             <div className="bg-[#141418] border border-[#27272e] rounded-xl p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Key size={16} className="text-[#FF7A00]" />
-                  <span className="text-xs font-bold text-white">URL de Origem do Aplicativo</span>
-                </div>
-                <span className="text-[11px] text-zinc-400">Origem necessária nas credenciais do Google Cloud</span>
-              </div>
-
-              <div className="flex items-center gap-2">
+              <label className="block text-xs font-bold text-white">
+                URL da API da sua Planilha (Google Apps Script Web App):
+              </label>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
-                  type="text"
-                  readOnly
-                  value={currentOrigin}
-                  className="w-full bg-[#0a0a0c] border border-[#2b2b32] text-xs font-mono text-zinc-300 rounded-lg px-3 py-2 select-all focus:outline-none"
+                  type="url"
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  value={webAppInput}
+                  onChange={(e) => setWebAppInput(e.target.value)}
+                  className="flex-1 bg-[#0a0a0c] border border-[#2b2b32] text-xs font-mono text-zinc-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#FF7A00]"
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    if (currentOrigin) {
-                      navigator.clipboard.writeText(currentOrigin);
-                      setCopiedOrigin(true);
-                      setTimeout(() => setCopiedOrigin(false), 3000);
-                    }
+                  onClick={async () => {
+                    saveWebAppUrl(webAppInput);
+                    setIsTesting(true);
+                    setTestResult(null);
+                    const res = await testWebAppConnection(webAppInput);
+                    setIsTesting(false);
+                    setTestResult(res);
                   }}
-                  className="bg-[#242429] hover:bg-[#2f2f38] text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-zinc-700 shrink-0"
+                  disabled={isTesting || !webAppInput.trim()}
+                  className="bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-bold px-4 py-2.5 rounded-lg transition-all shadow-md shadow-[#FF7A00]/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
                 >
-                  {copiedOrigin ? (
-                    <>
-                      <Check size={14} className="text-emerald-400" />
-                      <span className="text-emerald-400">Copiado!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={14} />
-                      <span>Copiar URL</span>
-                    </>
-                  )}
+                  <Save size={15} />
+                  {isTesting ? 'Testando...' : 'Salvar & Testar'}
                 </button>
               </div>
-            </div>
 
-            {/* OAuth Troubleshooting Accordion */}
-            <div className="border border-[#26262e] rounded-xl overflow-hidden bg-[#121216]">
-              <button
-                type="button"
-                onClick={() => setShowOAuthHelp(!showOAuthHelp)}
-                className="w-full p-4 text-left flex items-center justify-between hover:bg-[#18181f] transition-colors"
-              >
-                <div className="flex items-center gap-2.5">
-                  <ShieldAlert size={18} className="text-[#FF7A00]" />
-                  <div>
-                    <h3 className="text-xs font-bold text-white">Como resolver o &quot;Erro 400: origin_mismatch&quot; (Passo a Passo)</h3>
-                    <p className="text-[11px] text-zinc-400">O Google exige que a URL do aplicativo esteja autorizada no Console do Google Cloud.</p>
-                  </div>
+              {testResult && (
+                <div className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                  {testResult.success ? <Check size={16} /> : <AlertCircle size={16} />}
+                  <span>{testResult.message}</span>
                 </div>
-                {showOAuthHelp ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
-              </button>
+              )}
 
-              {showOAuthHelp && (
-                <div className="p-4 pt-0 border-t border-[#1e1e24] text-xs text-zinc-300 space-y-3">
-                  <ol className="list-decimal list-inside space-y-2 text-zinc-300 pl-1 mt-3">
-                    <li>
-                      Acesse o <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-[#FF7A00] underline font-medium inline-flex items-center gap-1">Console do Google Cloud <ExternalLink size={12} /></a>.
-                    </li>
-                    <li>
-                      Selecione o seu projeto e vá em <strong>APIs e Serviços &gt; Credenciais</strong>.
-                    </li>
-                    <li>
-                      Na seção <strong>IDs do cliente OAuth 2.0</strong>, clique no nome do seu cliente Web.
-                    </li>
-                    <li>
-                      Em <strong>&quot;Origens JavaScript autorizadas&quot;</strong>, clique em <strong>+ Adicionar URI</strong> e cole a URL de origem acima:
-                      <div className="mt-1 p-2 bg-[#09090b] rounded border border-zinc-800 font-mono text-[11px] text-[#FF7A00] select-all">
-                        {currentOrigin || 'https://seu-dominio.run.app'}
-                      </div>
-                    </li>
-                    <li>
-                      Em <strong>&quot;URIs de redirecionamento autorizados&quot;</strong>, adicione também a mesma URL caso solicitado.
-                    </li>
-                    <li>
-                      Clique em <strong>Salvar</strong> no final da página. (O Google pode levar cerca de 1 a 5 minutos para propagar a autorização).
-                    </li>
-                    <li>
-                      Se você utiliza o Firebase Authentication, acesse o <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-[#FF7A00] underline font-medium inline-flex items-center gap-1">Console do Firebase <ExternalLink size={12} /></a> &gt; <strong>Authentication</strong> &gt; <strong>Configurações</strong> &gt; <strong>Domínios autorizados</strong> e adicione o domínio.
-                    </li>
-                  </ol>
+              {/* Actions bar */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#222228]">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsSyncing(true);
+                    setSyncStatusMsg(null);
+                    const ok = await syncAllData();
+                    setIsSyncing(false);
+                    if (ok) {
+                      setSyncStatusMsg('Todos os dados (Clientes, Orçamentos, Itens e Catálogo) foram enviados para a Planilha Google com sucesso!');
+                    }
+                  }}
+                  disabled={isSyncing || !webAppInput.trim()}
+                  className="bg-[#242429] hover:bg-[#2e2e36] text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-zinc-700 disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={isSyncing ? 'animate-spin text-[#FF7A00]' : 'text-[#FF7A00]'} />
+                  {isSyncing ? 'Enviando...' : 'Enviar Dados para a Planilha'}
+                </button>
 
-                  {/* Custom Client ID Configuration */}
-                  <div className="mt-4 pt-4 border-t border-[#222228] space-y-2">
-                    <label className="block text-xs font-semibold text-zinc-300">
-                      ID de Cliente OAuth 2.0 Personalizado (Opcional):
-                    </label>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Ex: 537464647009-xxx.apps.googleusercontent.com"
-                        value={clientIdInput}
-                        onChange={(e) => setClientIdInput(e.target.value)}
-                        className="flex-1 bg-[#0a0a0c] border border-[#2b2b32] text-xs font-mono text-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:border-[#FF7A00]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          saveCustomClientId(clientIdInput);
-                          setSavedClientIdMsg(true);
-                          setTimeout(() => setSavedClientIdMsg(false), 3000);
-                        }}
-                        className="bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-md shadow-[#FF7A00]/20 shrink-0"
-                      >
-                        Salvar Client ID
-                      </button>
-                    </div>
-                    {savedClientIdMsg && (
-                      <p className="text-xs text-emerald-400 flex items-center gap-1.5">
-                        <Check size={14} /> Client ID salvo com sucesso!
-                      </p>
-                    )}
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsImporting(true);
+                    const res = await importAllFromSheets();
+                    setIsImporting(false);
+                    if (res.success) {
+                      setSyncStatusMsg(res.message);
+                      // reload catalog
+                      const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
+                      if (savedCatalog) {
+                        try { setCatalogItems(JSON.parse(savedCatalog)); } catch {}
+                      }
+                    } else {
+                      alert(res.message);
+                    }
+                  }}
+                  disabled={isImporting || !webAppInput.trim()}
+                  className="bg-[#242429] hover:bg-[#2e2e36] text-zinc-300 hover:text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-2 transition-all border border-zinc-800 disabled:opacity-50"
+                >
+                  <Download size={14} className={isImporting ? 'animate-bounce text-[#FF7A00]' : 'text-[#FF7A00]'} />
+                  {isImporting ? 'Importando...' : 'Importar Dados da Planilha'}
+                </button>
+              </div>
+
+              {syncStatusMsg && (
+                <p className="text-xs text-emerald-400 font-medium bg-emerald-500/10 p-2.5 rounded border border-emerald-500/20 flex items-center gap-2">
+                  <Check size={14} />
+                  {syncStatusMsg}
+                </p>
               )}
             </div>
 
-            {token ? (
-              <div className="bg-[#141418] border border-emerald-500/30 rounded-xl p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-lg">
-                      <FileSpreadsheet size={24} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-white">Planilha: JC Eletricista - Base de Dados</h3>
-                      <p className="text-xs text-zinc-400">
-                        {spreadsheetId ? `ID: ${spreadsheetId}` : 'Nenhuma planilha vinculada ainda.'}
-                      </p>
-                    </div>
+            {/* Como Configurar o Script em 30 Segundos */}
+            <div className="border border-[#26262e] rounded-xl overflow-hidden bg-[#121216]">
+              <button
+                type="button"
+                onClick={() => setShowScriptCode(!showScriptCode)}
+                className="w-full p-4 text-left flex items-center justify-between hover:bg-[#18181f] transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <HelpCircle size={18} className="text-[#FF7A00]" />
+                  <div>
+                    <h3 className="text-xs font-bold text-white">Como criar sua Planilha e obter a URL em 3 passos simples</h3>
+                    <p className="text-[11px] text-zinc-400">Sem configurações complexas no Google Cloud. Leva menos de 1 minuto.</p>
                   </div>
+                </div>
+                {showScriptCode ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+              </button>
 
-                  {spreadsheetId ? (
-                    <a
-                      href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all shrink-0 shadow-lg shadow-emerald-900/30"
-                    >
-                      <ExternalLink size={14} />
-                      Abrir no Google Sheets
-                    </a>
-                  ) : (
+              {showScriptCode && (
+                <div className="p-4 pt-0 border-t border-[#1e1e24] text-xs text-zinc-300 space-y-3">
+                  <ol className="list-decimal list-inside space-y-2 text-zinc-300 pl-1 mt-3">
+                    <li>
+                      Abra uma nova <a href="https://sheets.new" target="_blank" rel="noreferrer" className="text-[#FF7A00] underline font-medium inline-flex items-center gap-1">Planilha Google em branco <ExternalLink size={12} /></a> (dê o nome de <em>&quot;JC Eletricista - Base de Dados&quot;</em>).
+                    </li>
+                    <li>
+                      No menu superior da planilha, clique em <strong>Extensões &gt; Apps Script</strong>.
+                    </li>
+                    <li>
+                      Apague o que estiver lá e cole o código abaixo:
+                    </li>
+                  </ol>
+
+                  <div className="relative">
                     <button
                       type="button"
-                      onClick={handleCreateNewSpreadsheet}
-                      disabled={isCreatingSpreadsheet || isSyncing}
-                      className="bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-black px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all shrink-0 shadow-lg shadow-[#FF7A00]/20 disabled:opacity-50"
+                      onClick={() => {
+                        navigator.clipboard.writeText(APPS_SCRIPT_TEMPLATE);
+                        setCopiedScript(true);
+                        setTimeout(() => setCopiedScript(false), 3000);
+                      }}
+                      className="absolute top-2 right-2 bg-[#2a2a30] hover:bg-[#34343c] text-white text-xs px-3 py-1.5 rounded-lg border border-zinc-700 flex items-center gap-1.5 font-bold shadow transition-all z-10"
                     >
-                      <PlusCircle size={16} />
-                      {isCreatingSpreadsheet ? 'Criando Planilha...' : 'Criar Planilha Agora'}
+                      {copiedScript ? (
+                        <>
+                          <Check size={14} className="text-emerald-400" />
+                          <span className="text-emerald-400">Código Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={14} />
+                          <span>Copiar Código do Script</span>
+                        </>
+                      )}
                     </button>
-                  )}
+                    <pre className="p-3 bg-[#09090b] rounded-lg border border-zinc-800 text-[11px] font-mono text-zinc-300 overflow-x-auto max-h-48">
+                      {APPS_SCRIPT_TEMPLATE}
+                    </pre>
+                  </div>
+
+                  <ol start={4} className="list-decimal list-inside space-y-2 text-zinc-300 pl-1 mt-2">
+                    <li>
+                      No canto superior direito do Apps Script, clique no botão azul <strong>Implantar &gt; Nova implantação</strong>.
+                    </li>
+                    <li>
+                      Selecione o tipo <strong>App da Web</strong> (ícone de engrenagem).
+                    </li>
+                    <li>
+                      Em <strong>Quem pode acessar</strong>, escolha <strong>Qualquer pessoa (Anyone)</strong> e clique em <strong>Implantar</strong>.
+                    </li>
+                    <li>
+                      Copie a <strong>URL do App da Web</strong> fornecida e cole no campo acima!
+                    </li>
+                  </ol>
                 </div>
-
-                <div className="flex flex-wrap gap-2 pt-3 border-t border-[#242429]">
-                  <button
-                    type="button"
-                    onClick={handleManualSync}
-                    disabled={isSyncing || isCreatingSpreadsheet}
-                    className="bg-[#242429] hover:bg-[#2e2e36] text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-zinc-700 disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={isSyncing ? 'animate-spin text-[#FF7A00]' : 'text-[#FF7A00]'} />
-                    {isSyncing ? 'Sincronizando...' : 'Sincronizar Dados Agora'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCreateNewSpreadsheet}
-                    disabled={isSyncing || isCreatingSpreadsheet}
-                    className="bg-[#242429] hover:bg-[#2e2e36] text-zinc-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-zinc-800 disabled:opacity-50"
-                  >
-                    <PlusCircle size={14} />
-                    Recriar / Nova Planilha
-                  </button>
-                </div>
-
-                {syncStatusMsg && (
-                  <p className="text-xs text-emerald-400 font-medium bg-emerald-500/10 p-2.5 rounded border border-emerald-500/20 flex items-center gap-2">
-                    <Check size={14} />
-                    {syncStatusMsg}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="bg-[#141418] border border-[#242429] rounded-xl p-6 text-center space-y-4">
-                <p className="text-xs text-zinc-300 max-w-md mx-auto">
-                  Clique no botão abaixo para autorizar o acesso da sua conta Google e criar automaticamente a planilha <strong>JC Eletricista - Base de Dados</strong> no seu Google Drive.
-                </p>
-                <button
-                  type="button"
-                  onClick={login}
-                  className="inline-flex items-center justify-center gap-3 bg-white hover:bg-zinc-100 text-zinc-800 px-6 py-3 rounded-xl font-bold text-sm shadow-xl transition-all hover:scale-[1.01]"
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  Conectar com o Google
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 space-y-3">

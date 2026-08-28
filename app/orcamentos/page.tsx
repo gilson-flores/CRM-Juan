@@ -70,7 +70,7 @@ export default function OrcamentosPage() {
     '• Orçamento válido por 15 dias corridos.\n• Garantia sobre os serviços executados.\n• Materiais por conta do contratante, salvo acordo prévio.'
   );
 
-  const { token, spreadsheetId, syncDataToSheets } = useGoogleSheets();
+  const { syncAllData, isConnected } = useGoogleSheets();
   const [savedDrafts, setSavedDrafts] = useState<FullDraft[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -206,39 +206,8 @@ export default function OrcamentosPage() {
     localStorage.setItem('@jc-eletricista:quote_items_log', JSON.stringify(updatedLog));
 
     // Sincronizar com Google Sheets nas abas Orcamentos e Itens
-    if (token && spreadsheetId) {
-      try {
-        // Aba Orcamentos
-        const draftsSheetData = [
-          ['ID', 'Cliente', 'Data', 'Itens / Descrição', 'Valor Total (R$)'],
-          ...updatedDrafts.map(d => [
-            d.quoteNumber || d.id,
-            d.clientName,
-            d.date,
-            d.items.map(i => `${i.quantity}x ${i.description}`).join(', '),
-            d.total.toString()
-          ])
-        ];
-        await syncDataToSheets('Orcamentos', draftsSheetData);
-
-        // Aba Itens
-        const itemsSheetData = [
-          ['ID Item', 'ID Orçamento', 'Cliente', 'Descrição do Item / Serviço', 'Quantidade', 'Preço Unitário (R$)', 'Total Item (R$)', 'Data'],
-          ...updatedLog.map(i => [
-            i.id,
-            i.quoteId,
-            i.clientName,
-            i.description,
-            i.quantity.toString(),
-            i.unitPrice.toString(),
-            (i.quantity * i.unitPrice).toString(),
-            i.date
-          ])
-        ];
-        await syncDataToSheets('Itens', itemsSheetData);
-      } catch (err) {
-        console.error('Failed to sync to sheets:', err);
-      }
+    if (isConnected) {
+      syncAllData().catch(err => console.warn('Failed to sync to sheets:', err));
     }
 
     setIsSyncing(false);
@@ -328,18 +297,6 @@ export default function OrcamentosPage() {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-          {token && spreadsheetId && (
-            <a
-              href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center justify-center gap-1.5 bg-[#18181c] hover:bg-[#242429] border border-emerald-500/40 text-emerald-400 text-xs font-bold px-3 py-2 rounded-lg transition-all"
-            >
-              <ExternalLink size={14} />
-              Planilha Google
-            </a>
-          )}
-
           {/* Restaurar Rascunho */}
           <button 
             type="button"

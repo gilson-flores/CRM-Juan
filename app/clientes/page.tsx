@@ -58,7 +58,7 @@ export default function ClientesPage() {
     }
   }, []);
 
-  const { token, spreadsheetId, syncDataToSheets, syncAllData } = useGoogleSheets();
+  const { syncAllData, isConnected } = useGoogleSheets();
   const [isSyncing, setIsSyncing] = useState(false);
 
   const handleManualSync = async () => {
@@ -78,14 +78,8 @@ export default function ClientesPage() {
     localStorage.setItem('@jc-eletricista:clients', JSON.stringify(newClients));
     
     // Auto-sync to Google Sheets if connected
-    if (token && spreadsheetId) {
-      const sheetData = [
-        ['ID', 'Tipo', 'Nome', 'Documento', 'Telefone', 'Email', 'CEP', 'Endereço', 'Número', 'Complemento', 'Data de Cadastro'],
-        ...newClients.map(c => [
-          c.id, c.type, c.name, c.doc, c.phone, c.email, c.cep, c.address, c.number, c.complement, c.createdAt
-        ])
-      ];
-      syncDataToSheets('Clientes', sheetData);
+    if (isConnected) {
+      syncAllData().catch((e) => console.warn('Auto sync error:', e));
     }
   };
 
@@ -152,19 +146,7 @@ export default function ClientesPage() {
           <p className="text-sm text-on-surface-variant mt-1">Gerencie sua base de clientes, contatos e histórico de serviços.</p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
-          {token && spreadsheetId && (
-            <a
-              href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="bg-[#18181c] hover:bg-[#242429] border border-emerald-500/40 text-emerald-400 text-xs font-bold py-2 px-3 rounded-lg flex items-center gap-1.5 transition-all"
-            >
-              <ExternalLink size={14} />
-              Planilha Google
-            </a>
-          )}
-
-          {token && (
+          {isConnected && (
             <button
               type="button"
               onClick={handleManualSync}
@@ -172,7 +154,7 @@ export default function ClientesPage() {
               className="bg-[#18181c] hover:bg-[#242429] border border-[#2d2d34] text-zinc-300 hover:text-white text-xs font-bold py-2 px-3 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50"
             >
               <RefreshCw size={14} className={isSyncing ? 'animate-spin text-[#FF7A00]' : 'text-[#FF7A00]'} />
-              {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+              {isSyncing ? 'Enviando...' : 'Enviar para Planilha'}
             </button>
           )}
 

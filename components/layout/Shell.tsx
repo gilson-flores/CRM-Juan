@@ -43,7 +43,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-col gap-1.5 p-4 flex-1 overflow-y-auto">
           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-1">Menu Principal</span>
           {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+            const isActive = pathname === item.href || (item.href !== '/' && !!pathname && pathname.startsWith(item.href));
             return (
               <Link 
                 key={item.name} 

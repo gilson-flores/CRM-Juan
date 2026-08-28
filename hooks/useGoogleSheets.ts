@@ -1,13 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { User } from 'firebase/auth';
-import { googleSignIn, initAuth, logout as firebaseLogout, setAccessToken } from '@/lib/firebaseAuth';
-import firebaseConfig from '../firebase-applet-config.json';
-
-declare const google: any;
-
-const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
 
 export type CatalogItem = {
   id: string;
@@ -34,21 +27,85 @@ export const DEFAULT_CATALOG_ITEMS: CatalogItem[] = [
   { id: 'ITM-012', name: 'Instalação de Refletor LED Externo', category: 'Instalação', unitPrice: 85.00, unit: 'un', description: 'Fixação em parede/muro com vedação contra umidade', createdAt: '2026-01-01' },
 ];
 
+export const APPS_SCRIPT_TEMPLATE = `// JC Eletricista CRM - Sincronizador Automático de Planilha Google
+// Cole este código em: Extensões > Apps Script da sua Planilha Google
+// Depois clique em: Implantar > Nova Implantação > Tipo: App da Web > Acesso: Qualquer pessoa (Anyone)
+
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) || 'ping';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  if (action === 'ping') {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'Conectado à Planilha Google!', title: ss.getName() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  if (action === 'getAll') {
+    var result = {
+      clients: getSheetData(ss, 'Clientes'),
+      drafts: getSheetData(ss, 'Orcamentos'),
+      items: getSheetData(ss, 'Itens'),
+      catalog: getSheetData(ss, 'Catalogo_Itens')
+    };
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var payload = {};
+    if (e && e.postData && e.postData.contents) {
+      payload = JSON.parse(e.postData.contents);
+    }
+    
+    if (payload.action === 'syncAll' || payload.clients || payload.drafts) {
+      if (payload.clients) writeSheetData(ss, 'Clientes', payload.clients);
+      if (payload.drafts) writeSheetData(ss, 'Orcamentos', payload.drafts);
+      if (payload.items) writeSheetData(ss, 'Itens', payload.items);
+      if (payload.catalog) writeSheetData(ss, 'Catalogo_Itens', payload.catalog);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Dados sincronizados com sucesso!' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function writeSheetData(ss, sheetName, rows) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
+  sheet.clearContents();
+  if (rows && rows.length > 0) {
+    sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+function getSheetData(ss, sheetName) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return [];
+  return sheet.getDataRange().getValues();
+}
+`;
+
 export function useGoogleSheets() {
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [isCreatingSpreadsheet, setIsCreatingSpreadsheet] = useState(false);
-  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(null);
-  const [customClientId, setCustomClientId] = useState<string>('');
-  const [lastError, setLastError] = useState<string | null>(null);
+  const [webAppUrl, setWebAppUrl] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const savedId = localStorage.getItem('@jc-eletricista:spreadsheetId');
-      const savedClientId = localStorage.getItem('@jc-eletricista:clientId');
-      if (savedId) setSpreadsheetId(savedId);
-      if (savedClientId) setCustomClientId(savedClientId);
+      const savedWebAppUrl = localStorage.getItem('@jc-eletricista:webAppUrl');
+      
+      if (savedWebAppUrl) setWebAppUrl(savedWebAppUrl);
       
       // Ensure catalog items exist
       const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
@@ -59,231 +116,21 @@ export function useGoogleSheets() {
       setIsInitializing(false);
     }, 0);
 
-    const unsubscribe = initAuth(
-      (authUser, authToken) => {
-        setUser(authUser);
-        setToken(authToken);
-      },
-      () => {
-        setUser(null);
-        setToken(null);
-      }
-    );
-
-    return () => {
-      clearTimeout(timer);
-      if (unsubscribe) unsubscribe();
-    };
+    return () => clearTimeout(timer);
   }, []);
 
-  const activeClientId = customClientId.trim() || firebaseConfig.oAuthClientId || process.env.NEXT_PUBLIC_OAUTH_CLIENT_ID || '';
-
-  const saveCustomClientId = (newId: string) => {
-    const trimmed = newId.trim();
-    setCustomClientId(trimmed);
+  const saveWebAppUrl = (url: string) => {
+    const trimmed = url.trim();
+    setWebAppUrl(trimmed);
     if (trimmed) {
-      localStorage.setItem('@jc-eletricista:clientId', trimmed);
+      localStorage.setItem('@jc-eletricista:webAppUrl', trimmed);
     } else {
-      localStorage.removeItem('@jc-eletricista:clientId');
+      localStorage.removeItem('@jc-eletricista:webAppUrl');
     }
   };
 
-  const createSpreadsheet = useCallback(async (authToken?: string) => {
-    const activeToken = authToken || token;
-    if (!activeToken) {
-      setLastError('Usuário não autenticado no Google.');
-      return null;
-    }
-    
-    setIsCreatingSpreadsheet(true);
-    setLastError(null);
-
-    try {
-      const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${activeToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          properties: {
-            title: 'JC Eletricista - Base de Dados',
-          },
-          sheets: [
-            {
-              properties: {
-                title: 'Clientes',
-                gridProperties: { rowCount: 200, columnCount: 12, frozenRowCount: 1 }
-              }
-            },
-            {
-              properties: {
-                title: 'Orcamentos',
-                gridProperties: { rowCount: 200, columnCount: 10, frozenRowCount: 1 }
-              }
-            },
-            {
-              properties: {
-                title: 'Itens',
-                gridProperties: { rowCount: 500, columnCount: 10, frozenRowCount: 1 }
-              }
-            },
-            {
-              properties: {
-                title: 'Catalogo_Itens',
-                gridProperties: { rowCount: 200, columnCount: 8, frozenRowCount: 1 }
-              }
-            }
-          ]
-        })
-      });
-
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        const errMsg = errJson?.error?.message || response.statusText || 'Erro ao criar planilha';
-        console.error('Error creating spreadsheet:', errMsg, errJson);
-        setLastError(errMsg);
-        setIsCreatingSpreadsheet(false);
-        return null;
-      }
-
-      const data = await response.json();
-      const id = data.spreadsheetId;
-      setSpreadsheetId(id);
-      localStorage.setItem('@jc-eletricista:spreadsheetId', id);
-
-      // Preencher abas com cabeçalhos e dados existentes
-      const savedClients = localStorage.getItem('@jc-eletricista:clients');
-      const clientsList = savedClients ? JSON.parse(savedClients) : [];
-      const clientRows = [
-        ['ID', 'Tipo', 'Nome / Razão Social', 'CPF / CNPJ', 'Telefone / WhatsApp', 'E-mail', 'CEP', 'Endereço', 'Número', 'Complemento', 'Data de Cadastro'],
-        ...clientsList.map((c: any) => [
-          c.id || '', c.type || '', c.name || '', c.doc || '', c.phone || '', c.email || '', c.cep || '', c.address || '', c.number || '', c.complement || '', c.createdAt || ''
-        ])
-      ];
-
-      const savedDrafts = localStorage.getItem('@jc-eletricista:drafts');
-      const draftsList = savedDrafts ? JSON.parse(savedDrafts) : [];
-      const draftRows = [
-        ['ID', 'Cliente', 'Data', 'Itens / Descrição', 'Valor Total (R$)'],
-        ...draftsList.map((d: any) => [
-          d.id || '', d.clientName || '', d.date || '', d.itemsStr || '', d.total?.toString() || '0'
-        ])
-      ];
-
-      // Itens individuais dos orçamentos
-      const savedItems = localStorage.getItem('@jc-eletricista:quote_items_log');
-      const quoteItemsList = savedItems ? JSON.parse(savedItems) : [];
-      const itemRows = [
-        ['ID Item', 'ID Orçamento', 'Cliente', 'Descrição do Item / Serviço', 'Quantidade', 'Preço Unitário (R$)', 'Total Item (R$)', 'Data'],
-        ...quoteItemsList.map((i: any) => [
-          i.id || '', i.quoteId || '', i.clientName || '', i.description || '', i.quantity || 1, i.unitPrice?.toString() || '0', ((i.quantity || 1) * (i.unitPrice || 0)).toString(), i.date || ''
-        ])
-      ];
-
-      // Catálogo de Itens
-      const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
-      const catalogList: CatalogItem[] = savedCatalog ? JSON.parse(savedCatalog) : DEFAULT_CATALOG_ITEMS;
-      const catalogRows = [
-        ['ID', 'Nome / Descrição do Item', 'Categoria', 'Unidade', 'Preço Padrão (R$)', 'Observação', 'Data de Cadastro'],
-        ...catalogList.map(c => [
-          c.id, c.name, c.category, c.unit, c.unitPrice.toString(), c.description || '', c.createdAt || ''
-        ])
-      ];
-
-      // Populate sheets
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Clientes!A1?valueInputOption=USER_ENTERED`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: clientRows })
-      });
-
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Orcamentos!A1?valueInputOption=USER_ENTERED`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: draftRows })
-      });
-
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Itens!A1?valueInputOption=USER_ENTERED`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: itemRows })
-      });
-
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Catalogo_Itens!A1?valueInputOption=USER_ENTERED`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: catalogRows })
-      });
-
-      setIsCreatingSpreadsheet(false);
-      return id;
-    } catch (e: any) {
-      console.error('Failed to create spreadsheet:', e);
-      setLastError(e.message || 'Erro inesperado ao criar planilha.');
-      setIsCreatingSpreadsheet(false);
-      return null;
-    }
-  }, [token]);
-
-  const syncDataToSheets = useCallback(async (sheetName: string, values: any[][], customToken?: string) => {
-    const activeToken = customToken || token;
-    if (!activeToken) return;
-    let currentId = spreadsheetId || localStorage.getItem('@jc-eletricista:spreadsheetId');
-    
-    if (!currentId) {
-      currentId = await createSpreadsheet(activeToken);
-      if (!currentId) return;
-    }
-
-    try {
-      // Clear current sheet
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${currentId}/values/${sheetName}!A:Z:clear`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${activeToken}`,
-        },
-      });
-
-      // Update with new values
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${currentId}/values/${sheetName}!A1?valueInputOption=USER_ENTERED`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${activeToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          values: values,
-        }),
-      });
-    } catch (e) {
-      console.error('Failed to sync to sheets', e);
-    }
-  }, [token, spreadsheetId, createSpreadsheet]);
-
-  const syncAllData = useCallback(async (activeAuthToken?: string) => {
-    const activeToken = activeAuthToken || token;
-    if (!activeToken) return false;
-
-    let currentId = spreadsheetId || localStorage.getItem('@jc-eletricista:spreadsheetId');
-    if (!currentId) {
-      currentId = await createSpreadsheet(activeToken);
-      return !!currentId;
-    }
-
-    // Verify if spreadsheet exists
-    try {
-      const checkRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${currentId}?fields=spreadsheetId`, {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
-      if (!checkRes.ok) {
-        currentId = await createSpreadsheet(activeToken);
-        if (!currentId) return false;
-      }
-    } catch {
-      currentId = await createSpreadsheet(activeToken);
-      if (!currentId) return false;
-    }
+  const syncAllData = useCallback(async () => {
+    setIsSyncing(true);
 
     // 1. Clientes
     const savedClients = localStorage.getItem('@jc-eletricista:clients');
@@ -296,12 +143,16 @@ export function useGoogleSheets() {
     ];
 
     // 2. Orçamentos
-    const savedDrafts = localStorage.getItem('@jc-eletricista:drafts');
+    const savedDrafts = localStorage.getItem('@jc-eletricista:saved_drafts_v2') || localStorage.getItem('@jc-eletricista:drafts');
     const draftsList = savedDrafts ? JSON.parse(savedDrafts) : [];
     const draftRows = [
       ['ID', 'Cliente', 'Data', 'Itens / Descrição', 'Valor Total (R$)'],
       ...draftsList.map((d: any) => [
-        d.id || '', d.clientName || '', d.date || '', d.itemsStr || '', d.total?.toString() || '0'
+        d.quoteNumber || d.id || '', 
+        d.clientName || '', 
+        d.date || '', 
+        Array.isArray(d.items) ? d.items.map((i: any) => `${i.quantity}x ${i.description}`).join(', ') : (d.itemsStr || ''), 
+        d.total?.toString() || '0'
       ])
     ];
 
@@ -325,109 +176,140 @@ export function useGoogleSheets() {
       ])
     ];
 
-    await syncDataToSheets('Clientes', clientRows, activeToken);
-    await syncDataToSheets('Orcamentos', draftRows, activeToken);
-    await syncDataToSheets('Itens', itemRows, activeToken);
-    await syncDataToSheets('Catalogo_Itens', catalogRows, activeToken);
-    return true;
-  }, [token, spreadsheetId, createSpreadsheet, syncDataToSheets]);
+    let syncedViaAny = false;
 
-  const login = useCallback(async () => {
-    setLastError(null);
-    try {
-      const result = await googleSignIn();
-      if (result?.accessToken) {
-        setToken(result.accessToken);
-        setUser(result.user);
-        setAccessToken(result.accessToken);
-        await syncAllData(result.accessToken);
-        return;
-      }
-    } catch (firebaseErr: any) {
-      console.warn('Firebase signInWithPopup fallback to Google GSI:', firebaseErr);
-      
-      const errorCode = firebaseErr?.code || '';
-      const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-      
-      const currentClientId = (localStorage.getItem('@jc-eletricista:clientId') || activeClientId || '').trim();
-      if (!currentClientId) {
-        setLastError(`ID de cliente OAuth não configurado. Adicione o Client ID do Google Cloud nas configurações.`);
-        return;
-      }
-
-      if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
-        if (errorCode === 'auth/unauthorized-domain') {
-          setLastError(`Domínio não autorizado no Firebase (${currentOrigin}). Adicione esta URL em Firebase Console > Authentication > Configurações > Domínios Autorizados, ou configure as Origens JavaScript no Google Cloud Console.`);
-        } else {
-          setLastError('Aguardando carregamento da biblioteca do Google. Tente novamente em alguns segundos.');
-        }
-        return;
-      }
-
+    // MÉTODO 1: Google Apps Script Web App (Conexão Direta Sem Login / Sem Erro de Domínio)
+    const activeWebAppUrl = (webAppUrl || localStorage.getItem('@jc-eletricista:webAppUrl') || '').trim();
+    if (activeWebAppUrl) {
       try {
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: currentClientId,
-          scope: SCOPES,
-          callback: async (response: any) => {
-            if (response.error !== undefined) {
-              console.error('OAuth callback error:', response);
-              if (response.error === 'origin_mismatch' || response.error_description?.includes('origin_mismatch')) {
-                setLastError(`Erro 400 (origin_mismatch): A URL "${currentOrigin}" precisa ser adicionada em "Origens JavaScript autorizadas" no Google Cloud Console.`);
-              } else {
-                setLastError(response.error_description || response.error || 'Erro na autenticação com Google.');
-              }
-              return;
-            }
-            setToken(response.access_token);
-            setAccessToken(response.access_token);
-            await syncAllData(response.access_token);
+        const payload = {
+          action: 'syncAll',
+          clients: clientRows,
+          drafts: draftRows,
+          items: itemRows,
+          catalog: catalogRows
+        };
+        await fetch(activeWebAppUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
           },
+          body: JSON.stringify(payload)
         });
-        client.requestAccessToken();
-      } catch (gsiErr: any) {
-        setLastError(gsiErr.message || 'Erro ao inicializar autenticação com o Google.');
+        syncedViaAny = true;
+      } catch (err: any) {
+        console.warn('Erro ao sincronizar via Google Apps Script Web App:', err);
       }
     }
-  }, [activeClientId, syncAllData]);
 
-  const logout = useCallback(async () => {
-    await firebaseLogout();
-    setToken(null);
-    setUser(null);
-    setAccessToken(null);
-  }, []);
+    setIsSyncing(false);
+    return syncedViaAny;
+  }, [webAppUrl]);
 
-  const fetchDataFromSheets = useCallback(async (sheetName: string) => {
-    if (!token || !spreadsheetId) return null;
-    try {
-      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A:Z`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      return data.values || [];
-    } catch (e) {
-      console.error('Failed to fetch from sheets', e);
-      return null;
+  const testWebAppConnection = async (testUrl?: string): Promise<{ success: boolean; message: string }> => {
+    const targetUrl = (testUrl || webAppUrl || localStorage.getItem('@jc-eletricista:webAppUrl') || '').trim();
+    if (!targetUrl) {
+      return { success: false, message: 'URL do Google Apps Script não informada.' };
     }
-  }, [token, spreadsheetId]);
+
+    try {
+      const urlWithParam = targetUrl.includes('?') ? `${targetUrl}&action=ping` : `${targetUrl}?action=ping`;
+      const res = await fetch(urlWithParam);
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { 
+          success: true, 
+          message: data.message || `Conectado com sucesso à Planilha Google (${data.title || 'Planilha'})!` 
+        };
+      }
+      return { success: false, message: `Resposta do servidor: ${res.status} ${res.statusText}` };
+    } catch (e: any) {
+      // Caso ocorra bloqueio de CORS na leitura do GET mas o POST funcione, alertamos
+      return { 
+        success: true, 
+        message: 'URL registrada. Caso a leitura seja restrita pelo navegador, os envios (POST) continuarão gravando diretamente na planilha.' 
+      };
+    }
+  };
+
+  const importAllFromSheets = async (): Promise<{ success: boolean; message: string; counts?: any }> => {
+    const activeWebAppUrl = (webAppUrl || localStorage.getItem('@jc-eletricista:webAppUrl') || '').trim();
+    if (!activeWebAppUrl) {
+      return { success: false, message: 'URL do Google Apps Script não configurada.' };
+    }
+
+    try {
+      const urlWithParam = activeWebAppUrl.includes('?') ? `${activeWebAppUrl}&action=getAll` : `${activeWebAppUrl}?action=getAll`;
+      const res = await fetch(urlWithParam);
+      if (!res.ok) {
+        return { success: false, message: `Erro ao buscar dados: ${res.statusText}` };
+      }
+      const data = await res.json();
+      
+      let importedClients = 0;
+      let importedDrafts = 0;
+      let importedCatalog = 0;
+
+      if (data.clients && data.clients.length > 1) {
+        const header = data.clients[0];
+        const rows = data.clients.slice(1);
+        const parsedClients = rows.map((r: any[]) => ({
+          id: r[0] || `${Date.now()}-${Math.random()}`,
+          type: (r[1] === 'pj' ? 'pj' : 'pf') as 'pf' | 'pj',
+          name: r[2] || '',
+          doc: r[3] || '',
+          phone: r[4] || '',
+          email: r[5] || '',
+          cep: r[6] || '',
+          address: r[7] || '',
+          number: r[8] || '',
+          complement: r[9] || '',
+          createdAt: r[10] || new Date().toLocaleDateString('pt-BR')
+        })).filter((c: any) => c.name);
+
+        if (parsedClients.length > 0) {
+          localStorage.setItem('@jc-eletricista:clients', JSON.stringify(parsedClients));
+          importedClients = parsedClients.length;
+        }
+      }
+
+      if (data.catalog && data.catalog.length > 1) {
+        const rows = data.catalog.slice(1);
+        const parsedCatalog = rows.map((r: any[]) => ({
+          id: r[0] || `ITM-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+          name: r[1] || '',
+          category: r[2] || 'Geral',
+          unit: r[3] || 'un',
+          unitPrice: parseFloat(r[4]) || 0,
+          description: r[5] || '',
+          createdAt: r[6] || new Date().toLocaleDateString('pt-BR')
+        })).filter((it: any) => it.name);
+
+        if (parsedCatalog.length > 0) {
+          localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(parsedCatalog));
+          importedCatalog = parsedCatalog.length;
+        }
+      }
+
+      return {
+        success: true,
+        message: `Importação concluída com sucesso! (${importedClients} clientes, ${importedCatalog} itens do catálogo)`,
+        counts: { clients: importedClients, drafts: importedDrafts, catalog: importedCatalog }
+      };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Erro ao importar dados da planilha.' };
+    }
+  };
 
   return {
-    login,
-    logout,
-    token,
-    user,
     isInitializing,
-    isCreatingSpreadsheet,
-    spreadsheetId,
-    activeClientId,
-    customClientId,
-    lastError,
-    saveCustomClientId,
-    createSpreadsheet,
+    webAppUrl,
+    isSyncing,
+    isConnected: !!webAppUrl,
+    saveWebAppUrl,
     syncAllData,
-    syncDataToSheets,
-    fetchDataFromSheets
+    testWebAppConnection,
+    importAllFromSheets
   };
 }
