@@ -34,7 +34,7 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string }> => {
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
@@ -51,6 +51,10 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     
     return { user: result.user, accessToken: token };
   } catch (error: any) {
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+      // User closed the popup window without completing sign-in
+      return null;
+    }
     console.error('Sign in error:', error);
     throw error;
   } finally {

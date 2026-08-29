@@ -13,22 +13,25 @@ export default function DashboardPage() {
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
 
   useEffect(() => {
-    const savedClients = localStorage.getItem('@jc-eletricista:clients');
-    const savedQuotes = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
-    
-    if (savedClients) {
-      try {
-        const parsed: Client[] = JSON.parse(savedClients);
-        setTotalClients(parsed.length);
-      } catch(e) {}
-    }
+    const timer = setTimeout(() => {
+      const savedClients = localStorage.getItem('@jc-eletricista:clients');
+      const savedQuotes = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
+      
+      if (savedClients) {
+        try {
+          const parsed: Client[] = JSON.parse(savedClients);
+          setTotalClients(parsed.length);
+        } catch(e) {}
+      }
 
-    if (savedQuotes) {
-      try {
-        const parsedQuotes: FullDraft[] = JSON.parse(savedQuotes);
-        setQuotes(parsedQuotes);
-      } catch(e) {}
-    }
+      if (savedQuotes) {
+        try {
+          const parsedQuotes: FullDraft[] = JSON.parse(savedQuotes);
+          setQuotes(parsedQuotes);
+        } catch(e) {}
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

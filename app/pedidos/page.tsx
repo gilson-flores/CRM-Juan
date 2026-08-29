@@ -11,12 +11,15 @@ export default function PedidosPage() {
   const { syncAllData } = useGoogleSheets();
 
   useEffect(() => {
-    const saved = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
-    if (saved) {
-      try {
-        setQuotes(JSON.parse(saved));
-      } catch (e) {}
-    }
+    const timer = setTimeout(() => {
+      const saved = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
+      if (saved) {
+        try {
+          setQuotes(JSON.parse(saved));
+        } catch (e) {}
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
