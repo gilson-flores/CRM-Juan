@@ -7,9 +7,6 @@ export const metadata: Metadata = {
   description: 'Sistema de gestão para serviços elétricos residenciais e comerciais.',
 };
 
-export const dynamic = 'force-dynamic';
-export const fetchCache = 'force-no-store';
-
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="pt-BR" className="dark">
