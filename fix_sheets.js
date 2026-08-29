@@ -1,142 +1,10 @@
-'use client';
+const fs = require('fs');
+let code = fs.readFileSync('hooks/useGoogleSheets.ts', 'utf8');
 
-import { useState, useEffect, useCallback } from 'react';
+const targetStr = "  const syncAllData = useCallback(async () => {";
+const startIdx = code.indexOf(targetStr);
 
-export type CatalogItem = {
-  id: string;
-  name: string;
-  category: string;
-  unitPrice: number;
-  unit: string;
-  description?: string;
-  createdAt: string;
-};
-
-export const DEFAULT_CATALOG_ITEMS: CatalogItem[] = [];
-
-export const APPS_SCRIPT_TEMPLATE = `// JC Eletricista CRM - Sincronizador Automático de Planilha Google
-// Cole este código em: Extensões > Apps Script da sua Planilha Google
-// Depois clique em: Implantar > Nova Implantação > Tipo: App da Web > Acesso: Qualquer pessoa (Anyone)
-
-function doGet(e) {
-  var action = (e && e.parameter && e.parameter.action) || 'ping';
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  if (action === 'ping') {
-    return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'Conectado à Planilha Google!', title: ss.getName() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  if (action === 'getAll') {
-    var result = {
-      clients: getSheetData(ss, 'Clientes'),
-      drafts: getSheetData(ss, 'Orcamentos'),
-      items: getSheetData(ss, 'Itens'),
-      catalog: getSheetData(ss, 'Catalogo_Itens')
-    };
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function doPost(e) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var payload = {};
-    if (e && e.postData && e.postData.contents) {
-      payload = JSON.parse(e.postData.contents);
-    }
-    
-    if (payload.action === 'syncAll' || payload.clients || payload.drafts) {
-      if (payload.clients) writeSheetData(ss, 'Clientes', payload.clients);
-      if (payload.drafts) writeSheetData(ss, 'Orcamentos', payload.drafts);
-      if (payload.items) writeSheetData(ss, 'Itens', payload.items);
-      if (payload.catalog) writeSheetData(ss, 'Catalogo_Itens', payload.catalog);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Dados sincronizados com sucesso!' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch(err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: 'error', error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function writeSheetData(ss, sheetName, rows) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-  }
-  sheet.clearContents();
-  if (rows && rows.length > 0) {
-    sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
-  }
-}
-
-function getSheetData(ss, sheetName) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return [];
-  return sheet.getDataRange().getValues();
-}
-`;
-
-export function useGoogleSheets() {
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [webAppUrl, setWebAppUrl] = useState<string>('');
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      // 1. One-time purge of legacy mock / example data across the entire application
-      const PURGE_FLAG = '@jc-eletricista:sample_data_purged_v2';
-      const hasPurged = localStorage.getItem(PURGE_FLAG);
-      if (!hasPurged) {
-        localStorage.removeItem('@jc-eletricista:clients');
-        localStorage.removeItem('@jc-eletricista:saved_drafts_v2');
-        localStorage.removeItem('@jc-eletricista:drafts');
-        localStorage.removeItem('@jc-eletricista:quote_items_log');
-        localStorage.removeItem('@jc-eletricista:catalog_items');
-        localStorage.setItem(PURGE_FLAG, 'true');
-      }
-
-      const savedWebAppUrl = localStorage.getItem('@jc-eletricista:webAppUrl');
-      if (savedWebAppUrl) setWebAppUrl(savedWebAppUrl);
-      
-      // Ensure catalog items exist as empty array by default
-      const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
-      if (!savedCatalog) {
-        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
-      }
-
-      setIsInitializing(false);
-    }, 0);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  const clearAllLocalData = useCallback(() => {
-    localStorage.removeItem('@jc-eletricista:clients');
-    localStorage.removeItem('@jc-eletricista:saved_drafts_v2');
-    localStorage.removeItem('@jc-eletricista:drafts');
-    localStorage.removeItem('@jc-eletricista:quote_items_log');
-    localStorage.removeItem('@jc-eletricista:catalog_items');
-    localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
-  }, []);
-
-  const saveWebAppUrl = (url: string) => {
-    const trimmed = url.trim();
-    setWebAppUrl(trimmed);
-    if (trimmed) {
-      localStorage.setItem('@jc-eletricista:webAppUrl', trimmed);
-    } else {
-      localStorage.removeItem('@jc-eletricista:webAppUrl');
-    }
-  };
-
-  const syncAllData = useCallback(async () => {
+const newMethods = `  const syncAllData = useCallback(async () => {
     setIsSyncing(true);
 
     const savedClients = localStorage.getItem('@jc-eletricista:clients');
@@ -195,16 +63,16 @@ export function useGoogleSheets() {
       return { success: false, message: 'URL do Google Apps Script não informada.' };
     }
     try {
-      const urlWithParam = targetUrl.includes('?') ? `${targetUrl}&action=ping` : `${targetUrl}?action=ping`;
+      const urlWithParam = targetUrl.includes('?') ? \`\${targetUrl}&action=ping\` : \`\${targetUrl}?action=ping\`;
       const res = await fetch(urlWithParam);
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
         return { 
           success: true, 
-          message: data.message || `Conectado com sucesso à Planilha Google (${data.title || 'Planilha'})!` 
+          message: data.message || \`Conectado com sucesso à Planilha Google (\${data.title || 'Planilha'})!\` 
         };
       }
-      return { success: false, message: `Resposta do servidor: ${res.status} ${res.statusText}` };
+      return { success: false, message: \`Resposta do servidor: \${res.status} \${res.statusText}\` };
     } catch (e: any) {
       return { 
         success: true, 
@@ -223,7 +91,7 @@ export function useGoogleSheets() {
       // doGet from new Apps script doesn't need action=getAll to return everything, but it accepts it safely.
       const res = await fetch(activeWebAppUrl);
       if (!res.ok) {
-        return { success: false, message: `Erro ao buscar dados: ${res.statusText}` };
+        return { success: false, message: \`Erro ao buscar dados: \${res.statusText}\` };
       }
       const data = await res.json();
       
@@ -233,7 +101,7 @@ export function useGoogleSheets() {
 
       if (data.clients && Array.isArray(data.clients) && data.clients.length > 0) {
         const parsedClients = data.clients.map((r: any) => ({
-          id: r.id || `${Date.now()}-${Math.random()}`,
+          id: r.id || \`\${Date.now()}-\${Math.random()}\`,
           type: 'pf',
           name: r.name || '',
           doc: r.doc || '',
@@ -254,7 +122,7 @@ export function useGoogleSheets() {
 
       if (data.catalog && Array.isArray(data.catalog) && data.catalog.length > 0) {
         const parsedCatalog = data.catalog.map((r: any) => ({
-          id: r.id || `ITM-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+          id: r.id || \`ITM-\${Math.random().toString(36).substring(2, 6).toUpperCase()}\`,
           name: r.name || '',
           category: r.category || 'Geral',
           unit: r.unit || 'un',
@@ -273,7 +141,7 @@ export function useGoogleSheets() {
 
       return {
         success: true,
-        message: `Importação concluída com sucesso! (${importedClients} clientes, ${importedCatalog} itens do catálogo)`,
+        message: \`Importação concluída com sucesso! (\${importedClients} clientes, \${importedCatalog} itens do catálogo)\`,
         counts: { clients: importedClients, drafts: importedDrafts, catalog: importedCatalog }
       };
     } catch (e: any) {
@@ -293,3 +161,8 @@ export function useGoogleSheets() {
     clearAllLocalData
   };
 }
+`;
+
+code = code.substring(0, startIdx) + newMethods;
+fs.writeFileSync('hooks/useGoogleSheets.ts', code);
+console.log("Hooks patched successfully.");
