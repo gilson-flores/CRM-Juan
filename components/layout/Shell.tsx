@@ -2,12 +2,15 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { logout } from '@/lib/firebaseAuth';
+import { LogOut } from 'lucide-react';
 import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, HelpCircle, X, Wrench, CheckSquare } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
@@ -65,7 +68,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Sidebar Footer info */}
+        
         <div className="p-4 border-t border-[#1a1a1e] bg-[#070707]">
+          <button 
+            onClick={async () => {
+              await logout();
+              router.push('/login');
+            }}
+            className="w-full flex items-center justify-center gap-2 bg-[#141414] hover:bg-[#1a1a1a] border border-[#27272a] text-zinc-300 hover:text-white px-3 py-2 rounded-lg text-[11px] font-bold transition-all mb-4"
+          >
+            <LogOut size={14} /> Sair do Sistema
+          </button>
           <div className="flex items-center justify-between text-[11px] text-zinc-400">
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#FF7A00] animate-pulse"></span>
@@ -74,6 +87,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <span className="text-zinc-400 font-mono">v1.2</span>
           </div>
         </div>
+
       </aside>
 
       {/* Main Content */}
