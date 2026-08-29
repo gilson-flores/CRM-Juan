@@ -1,5 +1,6 @@
 import type {NextConfig} from 'next';
 
+
 const isGithubActions = process.env.GITHUB_ACTIONS === 'true';
 
 const nextConfig: NextConfig = {
@@ -29,7 +30,7 @@ const nextConfig: NextConfig = {
       }
     ],
   },
-  output: 'export',
+  
   transpilePackages: ['motion'],
   webpack: (config, {dev}) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.

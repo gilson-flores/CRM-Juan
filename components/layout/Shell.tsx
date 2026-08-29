@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, HelpCircle, X } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, HelpCircle, X, Wrench, CheckSquare } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -14,6 +14,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Clientes', href: '/clientes', icon: Users },
     { name: 'Orçamentos', href: '/orcamentos', icon: FileText },
+    { name: 'Pedidos', href: '/pedidos', icon: CheckSquare },
+    { name: 'Catálogo', href: '/catalogo', icon: Wrench },
     { name: 'Configurações', href: '/configuracoes', icon: Settings },
   ];
 

@@ -21,12 +21,41 @@ export type PdfQuoteData = {
   observations?: string;
 };
 
-export const generateQuotePdf = (data: PdfQuoteData) => {
+const getLogoBase64 = (): Promise<string> => {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve('');
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 500;
+      canvas.height = 500;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, 500, 500);
+        ctx.drawImage(img, 0, 0, 500, 500);
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      } else {
+        resolve('');
+      }
+    };
+    img.onerror = () => resolve('');
+    img.src = '/logo.svg';
+  });
+};
+
+export const generateQuotePdf = async (data: PdfQuoteData) => {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
   });
+
+  const logoBase64 = await getLogoBase64();
 
   const primaryOrange = [255, 122, 0] as [number, number, number];
   const darkBg = [20, 20, 24] as [number, number, number];
@@ -34,41 +63,38 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
 
   // Top Banner
   doc.setFillColor(...darkBg);
-  doc.rect(0, 0, 210, 38, 'F');
+  doc.rect(0, 0, 210, 42, 'F');
 
   // Orange Accent Line
   doc.setFillColor(...primaryOrange);
-  doc.rect(0, 38, 210, 2, 'F');
+  doc.rect(0, 42, 210, 2, 'F');
 
-  // Company Name & Slogan
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text('JC ELETRICISTA', 14, 16);
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...primaryOrange);
-  doc.text('SERVIÇOS ELÉTRICOS RESIDENCIAIS E COMERCIAIS', 14, 23);
-
-  doc.setTextColor(190, 190, 200);
-  doc.setFontSize(8);
-  doc.text('Instalações • Manutenções • Quadros • Padrão de Entrada • Laudos', 14, 30);
+  if (logoBase64) {
+    // Add logo to top left. Original aspect is 1:1 since canvas is 500x500
+    // We'll make it 34x34 mm
+    doc.addImage(logoBase64, 'JPEG', 14, 4, 34, 34);
+  } else {
+    // Fallback if logo fails to load
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.text('JC ELETRICISTA', 14, 24);
+  }
 
   // Quote Meta Info (Right side of header)
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text('ORÇAMENTO', 196, 16, { align: 'right' });
+  doc.setFontSize(15);
+  doc.text('ORÇAMENTO', 196, 18, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(10);
   doc.setTextColor(220, 220, 220);
-  doc.text(`Nº: ${data.quoteNumber || '2026-001'}`, 196, 23, { align: 'right' });
-  doc.text(`Data: ${data.date || new Date().toLocaleDateString('pt-BR')}`, 196, 30, { align: 'right' });
+  doc.text(`Nº: ${data.quoteNumber || '2026-001'}`, 196, 26, { align: 'right' });
+  doc.text(`Data: ${data.date || new Date().toLocaleDateString('pt-BR')}`, 196, 33, { align: 'right' });
 
   // Client Info Box
-  let y = 48;
+  let y = 52;
   doc.setFillColor(248, 249, 250);
   doc.setDrawColor(225, 228, 232);
   doc.roundedRect(14, y, 182, 30, 2, 2, 'FD');
@@ -94,7 +120,6 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
     data.clientDoc ? `CPF/CNPJ: ${data.clientDoc}` : '',
     data.clientEmail ? `E-mail: ${data.clientEmail}` : ''
   ].filter(Boolean).join('  |  ');
-
   if (contactInfo) {
     doc.setFontSize(8);
     doc.text(contactInfo, 18, y + 25);
@@ -142,8 +167,6 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   // Summary / Totals
   const finalY = (doc as any).lastAutoTable?.finalY || 140;
   let totalsY = finalY + 8;
-
-  // If table is near bottom, create new page
   if (totalsY > 230) {
     doc.addPage();
     totalsY = 20;
@@ -171,7 +194,7 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
     // Total row
     doc.setDrawColor(220, 220, 225);
     doc.line(totalsBoxX + 6, totalsY + 20, totalsBoxX + totalsBoxWidth - 6, totalsY + 20);
-
+    
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(20, 20, 24);
@@ -182,7 +205,7 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
     // Total row without discount
     doc.setDrawColor(220, 220, 225);
     doc.line(totalsBoxX + 6, totalsY + 12, totalsBoxX + totalsBoxWidth - 6, totalsY + 12);
-
+    
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(20, 20, 24);
@@ -195,7 +218,7 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   const obsWidth = 96;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(225, 228, 232);
-  doc.roundedRect(14, totalsY, obsWidth, 34, 2, 2, 'FD');
+  doc.roundedRect(14, totalsY, obsWidth, 42, 2, 2, 'FD'); // Made taller for the extra lines
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
@@ -205,12 +228,22 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(80, 80, 90);
-  const obsContent = data.observations || '• Orçamento válido por 15 dias corridos.\n• Garantia sobre os serviços executados.\n• Materiais por conta do contratante, salvo acordo prévio.';
+
+  const entrada = data.total * 0.3;
+  const saldo = data.total * 0.7;
+  const formatCurrency = (val: number) => `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const obsContent = `• Orçamento válido por 15 dias corridos.
+• Garantia de 90 dias sobre os serviço contratados.
+• Materiais por conta do contratante. (salvo acordo prévio).
+• Parcelamento padrão 30% da mão de obra de entrada [${formatCurrency(entrada)}].
+• Saldo ao final dos trabalhos [${formatCurrency(saldo)}].`;
+
   const splitObs = doc.splitTextToSize(obsContent, obsWidth - 8);
   doc.text(splitObs, 18, totalsY + 12);
 
   // Signatures at bottom
-  let sigY = Math.max(totalsY + 44, 255);
+  let sigY = Math.max(totalsY + 54, 255);
   if (sigY > 270) {
     doc.addPage();
     sigY = 250;
@@ -219,7 +252,7 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   doc.setDrawColor(180, 180, 190);
   doc.line(20, sigY, 90, sigY);
   doc.line(120, sigY, 190, sigY);
-
+  
   doc.setFontSize(8);
   doc.setTextColor(...grayText);
   doc.text('JC Eletricista', 55, sigY + 5, { align: 'center' });
@@ -227,8 +260,11 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
 
   // Footer note
   doc.setFontSize(7);
-  doc.setTextColor(160, 160, 170);
-  doc.text('Documento gerado pelo sistema JC Eletricista CRM • Salvo em Google Sheets & Drive', 105, 290, { align: 'center' });
+  doc.setTextColor(140, 140, 150);
+  doc.text('JC ELETRICISTA • SERVIÇOS ELÉTRICOS RESIDENCIAIS E COMERCIAIS', 105, 284, { align: 'center' });
+  doc.text('Instalações • Manutenções • Quadros • Padrão de Entrada • Laudos', 105, 288, { align: 'center' });
+  doc.setTextColor(170, 170, 180);
+  doc.text('Documento gerado pelo sistema JC Eletricista CRM', 105, 292, { align: 'center' });
 
   // Generate File & Trigger Safe Download across iOS & Android
   const fileName = `Orcamento_${(data.clientName || 'Cliente').replace(/[^a-zA-Z0-9]/g, '_')}_${data.quoteNumber || Date.now()}.pdf`;
@@ -236,7 +272,7 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   // Safe cross-platform save:
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
-
+  
   // Trigger download / open
   const link = document.createElement('a');
   link.href = blobUrl;
@@ -245,7 +281,8 @@ export const generateQuotePdf = (data: PdfQuoteData) => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-
+  
   setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  
   return { doc, blobUrl, fileName };
 };
