@@ -277,6 +277,9 @@ export function useGoogleSheets() {
         counts: { clients: importedClients, drafts: importedDrafts, catalog: importedCatalog }
       };
     } catch (e: any) {
+      if (e.message === 'Failed to fetch') {
+        return { success: false, message: 'Erro de conexão (Failed to fetch).\n\nSOLUÇÃO:\n1. Volte no Apps Script.\n2. Clique em "Implantar" > "Gerenciar implantações".\n3. Edite (lápis) a implantação.\n4. Mude a versão para "Nova versão".\n5. Certifique-se de que "Quem pode acessar" está como "Qualquer pessoa".\n6. Salve e tente novamente.' };
+      }
       return { success: false, message: e.message || 'Erro ao importar dados da planilha.' };
     }
   };
