@@ -529,7 +529,7 @@ export default function OrcamentosPage() {
 
             {/* Totals Section */}
             <div className="flex justify-end mt-2">
-              <div className="w-72 bg-surface-container-high p-4 rounded-xl border border-outline-variant space-y-2.5">
+              <div className="w-full sm:w-72 bg-surface-container-high p-4 rounded-xl border border-outline-variant space-y-2.5">
                 <div className="flex justify-between items-center text-xs">
                   <span className="font-semibold text-on-surface-variant uppercase tracking-wider text-[10px]">Subtotal:</span>
                   <span className="text-on-surface font-mono font-semibold">R$ {formatCurrency(subtotal)}</span>

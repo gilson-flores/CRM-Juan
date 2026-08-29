@@ -402,11 +402,11 @@ export default function ClientesPage() {
               </form>
             </div>
             
-            <div className="px-6 py-4 border-t border-outline-variant bg-surface-container-low flex justify-end gap-4 shrink-0">
-              <button onClick={closeModal} type="button" className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-on-surface transition-colors">
+            <div className="px-6 py-4 border-t border-outline-variant bg-surface-container-low flex flex-col-reverse sm:flex-row sm:justify-end gap-3 sm:gap-4 shrink-0">
+              <button onClick={closeModal} type="button" className="w-full sm:w-auto px-4 py-3 sm:py-2 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors rounded">
                 Cancelar
               </button>
-              <button form="clientForm" type="submit" className="bg-primary hover:bg-primary-container text-on-primary text-xs font-bold uppercase tracking-wider py-2 px-6 rounded transition-colors shadow-sm">
+              <button form="clientForm" type="submit" className="w-full sm:w-auto bg-primary hover:bg-primary-container text-on-primary text-xs font-bold uppercase tracking-wider py-3 sm:py-2 px-6 rounded transition-colors shadow-sm">
                 {editingId ? 'Salvar Alterações' : 'Salvar Cliente'}
               </button>
             </div>

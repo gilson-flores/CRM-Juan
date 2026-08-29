@@ -397,17 +397,17 @@ export default function CatalogoPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-[#242429]">
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 sm:gap-2 pt-3 border-t border-[#242429]">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white bg-[#1a1a20] rounded-lg transition-colors"
+                  className="w-full sm:w-auto px-4 py-3 sm:py-2 text-xs font-semibold text-zinc-400 hover:text-white bg-[#1a1a20] rounded-lg transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-black text-black bg-[#FF7A00] hover:bg-[#FF8A00] rounded-lg transition-colors flex items-center gap-1.5 shadow-lg shadow-[#FF7A00]/20"
+                  className="w-full sm:w-auto px-5 py-3 sm:py-2 text-xs font-black text-black bg-[#FF7A00] hover:bg-[#FF8A00] rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-lg shadow-[#FF7A00]/20"
                 >
                   <Save size={14} />
                   Salvar Item

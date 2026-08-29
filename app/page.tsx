@@ -232,7 +232,7 @@ export default function DashboardPage() {
             {filteredQuotes.length > 0 ? (
               <div className="divide-y divide-[#1f1f23]">
                 {filteredQuotes.slice(0, 6).map((q) => (
-                  <div key={q.id} className="py-3 flex items-center justify-between group">
+                  <div key={q.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 group">
                     <div className="flex flex-col">
                       <span className="font-bold text-[13px] text-zinc-100">{q.clientName}</span>
                       <div className="flex items-center gap-2 mt-0.5">
@@ -246,7 +246,7 @@ export default function DashboardPage() {
                         <span className="text-[10px] text-zinc-500 font-mono">#{q.quoteNumber}</span>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end">
+                    <div className="flex flex-row sm:flex-col justify-between sm:items-end">
                       <span className="text-[13px] font-black text-[#FF7A00] font-mono">
                         R$ {formatCurrency(q.total)}
                       </span>
