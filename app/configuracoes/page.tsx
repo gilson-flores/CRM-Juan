@@ -14,7 +14,9 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Download
+  Download,
+  Trash2,
+  Database
 } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 
@@ -25,6 +27,7 @@ export default function ConfiguracoesPage() {
     saveWebAppUrl,
     testWebAppConnection,
     importAllFromSheets,
+    clearAllLocalData,
     isConnected
   } = useGoogleSheets();
 
@@ -222,6 +225,38 @@ export default function ConfiguracoesPage() {
                 <li><strong className="text-zinc-200">Itens:</strong> Cada serviço ou material adicionado a qualquer orçamento (com ID individual, quantidade e preço).</li>
                 <li><strong className="text-zinc-200">Catalogo_Itens:</strong> Tabela de preços padrão de serviços e materiais.</li>
               </ul>
+            </div>
+          </div>
+
+          {/* Gerenciamento de Dados Locais */}
+          <div className="bg-[#0e0e11] border border-red-500/20 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
+                <Database size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Gerenciamento de Dados do Sistema</h3>
+                <p className="text-xs text-zinc-400">Limpar todos os registros locais (Clientes, Orçamentos, Pedidos e Catálogo) para reiniciar com a base zerada.</p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('ATENÇÃO: Deseja apagar todos os dados locais (clientes, orçamentos e itens)? Esta ação deixará o sistema 100% limpo.')) {
+                    clearAllLocalData();
+                    setSyncStatusMsg('Todos os dados locais foram apagados com sucesso! A base está 100% limpa.');
+                    setTimeout(() => {
+                      window.location.reload();
+                    }, 800);
+                  }
+                }}
+                className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all"
+              >
+                <Trash2 size={16} />
+                Limpar Todos os Dados Locais (Zerar Sistema)
+              </button>
             </div>
           </div>
         </div>

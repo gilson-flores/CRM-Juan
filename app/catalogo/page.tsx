@@ -28,7 +28,7 @@ import {
   ChevronUp,
   Download
 } from 'lucide-react';
-import { useGoogleSheets, CatalogItem, DEFAULT_CATALOG_ITEMS, APPS_SCRIPT_TEMPLATE } from '@/hooks/useGoogleSheets';
+import { useGoogleSheets, CatalogItem, APPS_SCRIPT_TEMPLATE } from '@/hooks/useGoogleSheets';
 
 export default function CatalogoPage() {
   const { 
@@ -41,7 +41,7 @@ export default function CatalogoPage() {
   } = useGoogleSheets();
 
   const [activeTab, setActiveTab] = useState<'integracao' | 'itens'>('itens');
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(DEFAULT_CATALOG_ITEMS);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   
@@ -84,10 +84,10 @@ export default function CatalogoPage() {
         try {
           setCatalogItems(JSON.parse(saved));
         } catch {
-          setCatalogItems(DEFAULT_CATALOG_ITEMS);
+          setCatalogItems([]);
         }
       } else {
-        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(DEFAULT_CATALOG_ITEMS));
+        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
       }
     }, 0);
     return () => clearTimeout(timer);
@@ -167,8 +167,8 @@ export default function CatalogoPage() {
   };
 
   const handleResetDefaultCatalog = async () => {
-    if (confirm('Restaurar os itens padrão do catálogo de eletricista?')) {
-      await saveCatalogItems(DEFAULT_CATALOG_ITEMS);
+    if (confirm('Deseja realmente limpar todos os itens do catálogo?')) {
+      await saveCatalogItems([]);
     }
   };
 
@@ -226,11 +226,11 @@ export default function CatalogoPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleResetDefaultCatalog}
-                title="Restaurar tabela padrão de serviços"
-                className="bg-[#18181c] hover:bg-[#222228] border border-[#2a2a30] text-zinc-400 hover:text-white text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+                title="Limpar todos os itens do catálogo"
+                className="bg-[#18181c] hover:bg-[#222228] border border-[#2a2a30] text-zinc-400 hover:text-red-400 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
               >
-                <RotateCcw size={14} />
-                Padrão
+                <Trash2 size={14} />
+                Limpar
               </button>
 
               <button

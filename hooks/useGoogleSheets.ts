@@ -12,20 +12,7 @@ export type CatalogItem = {
   createdAt: string;
 };
 
-export const DEFAULT_CATALOG_ITEMS: CatalogItem[] = [
-  { id: 'ITM-001', name: 'Instalação de Tomada Simples / Dupla', category: 'Instalação', unitPrice: 45.00, unit: 'un', description: 'Instalação de tomada com fiação pronta no local', createdAt: '2026-01-01' },
-  { id: 'ITM-002', name: 'Instalação de Interruptor Simples / Three-Way', category: 'Instalação', unitPrice: 50.00, unit: 'un', description: 'Instalação ou troca de módulo de interruptor', createdAt: '2026-01-01' },
-  { id: 'ITM-003', name: 'Troca de Disjuntor no QDC', category: 'Manutenção', unitPrice: 75.00, unit: 'un', description: 'Substituição de disjuntor termomagnético no quadro', createdAt: '2026-01-01' },
-  { id: 'ITM-004', name: 'Instalação de Luminária / Plafon LED', category: 'Instalação', unitPrice: 60.00, unit: 'un', description: 'Fixação e ligação de luminária de teto ou sobrepor', createdAt: '2026-01-01' },
-  { id: 'ITM-005', name: 'Instalação de Chuveiro Elétrico', category: 'Instalação', unitPrice: 90.00, unit: 'un', description: 'Ligação com conectores de louça ou wago e teste de vazamento', createdAt: '2026-01-01' },
-  { id: 'ITM-006', name: 'Passagem de Fiação por Ponto', category: 'Instalação', unitPrice: 80.00, unit: 'ponto', description: 'Puxamento e guia de cabos flexíveis por eletroduto', createdAt: '2026-01-01' },
-  { id: 'ITM-007', name: 'Montagem e Balanceamento de QDC', category: 'Instalação', unitPrice: 350.00, unit: 'un', description: 'Organização, barramentos, DPS, DR e identificação', createdAt: '2026-01-01' },
-  { id: 'ITM-008', name: 'Instalação de Ventilador de Teto', category: 'Instalação', unitPrice: 130.00, unit: 'un', description: 'Montagem, fixação na caixa reforçada e ligação do controle', createdAt: '2026-01-01' },
-  { id: 'ITM-009', name: 'Instalação de Sensor de Presença / Relé', category: 'Instalação', unitPrice: 55.00, unit: 'un', description: 'Regulagem de tempo, sensibilidade e ligação', createdAt: '2026-01-01' },
-  { id: 'ITM-010', name: 'Localização e Correção de Curto-Circuito', category: 'Manutenção', unitPrice: 180.00, unit: 'serviço', description: 'Diagnóstico com multímetro/alicate e reparo da fuga/curto', createdAt: '2026-01-01' },
-  { id: 'ITM-011', name: 'Tomada de Ar-Condicionado 20A / Circuito Dedicado', category: 'Instalação', unitPrice: 120.00, unit: 'ponto', description: 'Circuito independente com disjuntor exclusivo', createdAt: '2026-01-01' },
-  { id: 'ITM-012', name: 'Instalação de Refletor LED Externo', category: 'Instalação', unitPrice: 85.00, unit: 'un', description: 'Fixação em parede/muro com vedação contra umidade', createdAt: '2026-01-01' },
-];
+export const DEFAULT_CATALOG_ITEMS: CatalogItem[] = [];
 
 export const APPS_SCRIPT_TEMPLATE = `// JC Eletricista CRM - Sincronizador Automático de Planilha Google
 // Cole este código em: Extensões > Apps Script da sua Planilha Google
@@ -103,20 +90,40 @@ export function useGoogleSheets() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      // 1. One-time purge of legacy mock / example data across the entire application
+      const PURGE_FLAG = '@jc-eletricista:sample_data_purged_v2';
+      const hasPurged = localStorage.getItem(PURGE_FLAG);
+      if (!hasPurged) {
+        localStorage.removeItem('@jc-eletricista:clients');
+        localStorage.removeItem('@jc-eletricista:saved_drafts_v2');
+        localStorage.removeItem('@jc-eletricista:drafts');
+        localStorage.removeItem('@jc-eletricista:quote_items_log');
+        localStorage.removeItem('@jc-eletricista:catalog_items');
+        localStorage.setItem(PURGE_FLAG, 'true');
+      }
+
       const savedWebAppUrl = localStorage.getItem('@jc-eletricista:webAppUrl');
-      
       if (savedWebAppUrl) setWebAppUrl(savedWebAppUrl);
       
-      // Ensure catalog items exist
+      // Ensure catalog items exist as empty array by default
       const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
       if (!savedCatalog) {
-        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(DEFAULT_CATALOG_ITEMS));
+        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
       }
 
       setIsInitializing(false);
     }, 0);
 
     return () => clearTimeout(timer);
+  }, []);
+
+  const clearAllLocalData = useCallback(() => {
+    localStorage.removeItem('@jc-eletricista:clients');
+    localStorage.removeItem('@jc-eletricista:saved_drafts_v2');
+    localStorage.removeItem('@jc-eletricista:drafts');
+    localStorage.removeItem('@jc-eletricista:quote_items_log');
+    localStorage.removeItem('@jc-eletricista:catalog_items');
+    localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
   }, []);
 
   const saveWebAppUrl = (url: string) => {
@@ -310,6 +317,7 @@ export function useGoogleSheets() {
     saveWebAppUrl,
     syncAllData,
     testWebAppConnection,
-    importAllFromSheets
+    importAllFromSheets,
+    clearAllLocalData
   };
 }

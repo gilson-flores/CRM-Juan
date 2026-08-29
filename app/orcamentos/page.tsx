@@ -20,7 +20,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import type { Client } from '../clientes/page';
-import { useGoogleSheets, CatalogItem, DEFAULT_CATALOG_ITEMS } from '@/hooks/useGoogleSheets';
+import { useGoogleSheets, CatalogItem } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
 
 // Helper para gerar identificadores únicos de forma segura
@@ -54,7 +54,7 @@ export type FullDraft = {
 
 export default function OrcamentosPage() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(DEFAULT_CATALOG_ITEMS);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   
   // Form State
   const [quoteNumber, setQuoteNumber] = useState('2026-0001');
