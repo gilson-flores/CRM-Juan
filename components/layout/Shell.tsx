@@ -58,83 +58,84 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#080808] px-4 py-8">
-        <div className="w-full max-w-md bg-[#0e0e11] border border-[#222226] rounded-2xl shadow-2xl p-8 sm:p-10">
-          <div className="flex justify-center mb-8">
-            <Logo variant="compact" size="xl" />
+      <div className="min-h-screen w-full bg-[#080808] flex items-center justify-center p-4">
+        <div className="w-full max-w-[420px] bg-[#0e0e11] border border-[#222226] rounded-2xl shadow-2xl p-6 sm:p-8">
+          <div className="flex justify-center mb-6">
+            <Logo variant="compact" size="lg" />
           </div>
           
-          <h1 className="text-2xl font-bold text-center text-white mb-2">CRM JC Eletricista</h1>
-          <p className="text-sm text-center text-zinc-400 mb-8">Entre para gerenciar seus orçamentos e clientes.</p>
+          <h1 className="text-xl font-bold text-center text-white mb-1.5">CRM JC Eletricista</h1>
+          <p className="text-xs text-center text-zinc-400 mb-6">Entre para gerenciar seus orçamentos e clientes.</p>
 
-          <div className="flex items-center gap-2 mb-8 bg-[#141418] p-1.5 rounded-xl">
+          <div className="grid grid-cols-2 gap-2 mb-6 bg-[#141418] p-1 rounded-xl border border-[#222228]">
             <button
               type="button"
               onClick={() => { setAuthMode('login'); setAuthError(''); }}
-              className={`flex-1 text-sm font-bold py-2.5 rounded-lg transition-all ${authMode === 'login' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`w-full text-xs font-bold py-2.5 rounded-lg transition-all text-center cursor-pointer ${authMode === 'login' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
               Já tenho conta
             </button>
             <button
               type="button"
               onClick={() => { setAuthMode('register'); setAuthError(''); }}
-              className={`flex-1 text-sm font-bold py-2.5 rounded-lg transition-all ${authMode === 'register' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`w-full text-xs font-bold py-2.5 rounded-lg transition-all text-center cursor-pointer ${authMode === 'register' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
               Criar nova conta
             </button>
           </div>
 
           {authError && (
-            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold flex items-center gap-2">
-              <AlertCircle size={16} /> {authError}
+            <div className="mb-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2 text-left">
+              <AlertCircle size={15} className="shrink-0" />
+              <span>{authError}</span>
             </div>
           )}
 
-          <form onSubmit={handleAuth} className="space-y-5">
+          <form onSubmit={handleAuth} className="space-y-4 w-full">
             {authMode === 'register' && (
-              <div>
-                <label className="block text-sm font-semibold text-zinc-300 mb-2">Seu Nome</label>
+              <div className="w-full text-left">
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Seu Nome</label>
                 <input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                  className="w-full box-border bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
                   placeholder="Ex: Juan Carlos"
                 />
               </div>
             )}
-            <div>
-              <label className="block text-sm font-semibold text-zinc-300 mb-2">E-mail</label>
+            <div className="w-full text-left">
+              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">E-mail</label>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                className="w-full box-border bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
                 placeholder="seu@email.com"
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-zinc-300 mb-2">Senha</label>
+            <div className="w-full text-left">
+              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Senha</label>
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                className="w-full box-border bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
                 placeholder="••••••••"
               />
             </div>
             <button
               type="submit"
               disabled={isLoadingAuth}
-              className="w-full bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-sm font-bold px-4 py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md mt-8 disabled:opacity-50"
+              className="w-full bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-xs font-bold px-4 py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md mt-6 disabled:opacity-50 cursor-pointer"
             >
               {isLoadingAuth ? (
-                <div className="w-5 h-5 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
               ) : (
-                <LogIn size={18} />
+                <LogIn size={16} />
               )}
               {authMode === 'login' ? 'Entrar no Sistema' : 'Criar Conta e Entrar'}
             </button>
