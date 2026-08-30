@@ -30,21 +30,11 @@ import type { CompanySettings } from '@/lib/firebase';
 
 export default function ConfiguracoesPage() {
   const { 
-    user, 
-    authLoading, 
     companySettings, 
-    updateSettings, 
-    forceSync, 
-    isSyncing, 
-    clearAllData, 
-    loginGoogle, 
-    logout,
-    clients,
-    quotes,
-    catalog
+    updateSettings 
   } = useFirebaseData();
 
-  const [activeTab, setActiveTab] = useState<'empresa' | 'financeiro' | 'orcamentos' | 'nuvem'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'financeiro' | 'orcamentos'>('empresa');
   const [formData, setFormData] = useState<CompanySettings>(companySettings);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -63,38 +53,11 @@ export default function ConfiguracoesPage() {
     setIsSaving(false);
 
     if (success) {
-      setStatusMessage({ text: 'Configurações salvas e sincronizadas na nuvem com sucesso!', type: 'success' });
+      setStatusMessage({ text: 'Configurações salvas com sucesso!', type: 'success' });
       setTimeout(() => setStatusMessage(null), 5000);
     } else {
       setStatusMessage({ text: 'Erro ao salvar configurações no servidor.', type: 'error' });
     }
-  };
-
-  const handleManualCloudSync = async () => {
-    setStatusMessage(null);
-    const res = await forceSync();
-    if (res.success) {
-      setStatusMessage({ text: res.message, type: 'success' });
-    } else {
-      setStatusMessage({ text: res.message, type: 'error' });
-    }
-  };
-
-  const handleExportBackup = () => {
-    const backupData = {
-      exportedAt: new Date().toISOString(),
-      companySettings: formData,
-      clients,
-      quotes,
-      catalog
-    };
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `backup_jc_eletricista_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
   };
 
   return (
@@ -107,15 +70,7 @@ export default function ConfiguracoesPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">Central de Configurações do Negócio</h1>
-            <p className="text-xs text-zinc-400">Personalize os dados da sua empresa, dados bancários PIX, regras de orçamentos e nuvem.</p>
-          </div>
-        </div>
-
-        {/* Cloud Status Pill */}
-        <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 bg-[#141418] border border-emerald-500/30 rounded-xl flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[11px] font-bold text-emerald-400">Firebase Firestore Ativo</span>
+            <p className="text-xs text-zinc-400">Personalize os dados da sua empresa, dados bancários PIX e regras de orçamentos.</p>
           </div>
         </div>
       </div>
@@ -168,7 +123,7 @@ export default function ConfiguracoesPage() {
         <button
           type="button"
           onClick={() => setActiveTab('orcamentos')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeTab === 'orcamentos'
               ? 'bg-[#FF7A00] text-black shadow-md shadow-[#FF7A00]/20'
               : 'bg-[#141418] text-zinc-400 hover:text-white border border-[#26262c]'
@@ -176,19 +131,6 @@ export default function ConfiguracoesPage() {
         >
           <FileText size={15} />
           Padrões de Orçamento & Garantia
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('nuvem')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'nuvem'
-              ? 'bg-[#FF7A00] text-black shadow-md shadow-[#FF7A00]/20'
-              : 'bg-[#141418] text-zinc-400 hover:text-white border border-[#26262c]'
-          }`}
-        >
-          <ShieldCheck size={15} />
-          Conta, Autenticação & Nuvem
         </button>
       </div>
 
@@ -436,141 +378,6 @@ export default function ConfiguracoesPage() {
                   className="w-full bg-[#141418] border border-[#27272e] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] leading-relaxed"
                   placeholder="Garantia de 90 dias sobre a mão de obra..."
                 />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ABA 4: CONTA, AUTENTICAÇÃO & NUVEM FIREBASE */}
-        {activeTab === 'nuvem' && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Card de Autenticação com Google */}
-            <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-[#18181c] border border-[#2d2d32] rounded-xl text-[#FF7A00]">
-                    <ShieldCheck size={28} />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-white">Autenticação Segura Firebase</h2>
-                    <p className="text-xs text-zinc-400">
-                      Acesso seguro aos seus orçamentos e clientes através de login Google autenticado.
-                    </p>
-                  </div>
-                </div>
-
-                {user ? (
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-full flex items-center gap-1.5">
-                      <Check size={14} /> Conectado
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => logout()}
-                      className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-full flex items-center gap-1.5 transition-colors"
-                    >
-                      <LogOut size={13} /> Sair
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await loginGoogle();
-                      } catch (e: any) {
-                        alert('Erro ao fazer login com Google: ' + (e.message || e));
-                      }
-                    }}
-                    className="bg-white hover:bg-zinc-100 text-black text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 transition-all shadow-md"
-                  >
-                    <LogIn size={15} /> Entrar com Google
-                  </button>
-                )}
-              </div>
-
-              {user && (
-                <div className="bg-[#141418] border border-[#27272e] p-4 rounded-xl flex items-center gap-3">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName || 'Avatar'} className="w-10 h-10 rounded-full border border-[#FF7A00]" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-[#FF7A00]/20 text-[#FF7A00] flex items-center justify-center font-bold">
-                      {user.displayName?.slice(0, 2).toUpperCase() || 'JC'}
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-xs font-bold text-white">{user.displayName || 'Usuário JC Eletricista'}</p>
-                    <p className="text-[11px] text-zinc-400 font-mono">{user.email}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Sincronização em Massa & Backup */}
-            <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded-xl text-[#FF7A00]">
-                  <Cloud size={20} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Sincronização Nuvem em Tempo Real</h3>
-                  <p className="text-xs text-zinc-400">
-                    O banco de dados Firebase Firestore armazena automaticamente cada cliente, orçamento, pedido e item cadastrado.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleManualCloudSync}
-                  disabled={isSyncing}
-                  className="bg-[#18181c] hover:bg-[#222228] border border-[#2b2b32] text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50"
-                >
-                  <RefreshCw size={14} className={isSyncing ? 'animate-spin text-[#FF7A00]' : 'text-[#FF7A00]'} />
-                  {isSyncing ? 'Sincronizando Nuvem...' : 'Forçar Sincronização Nuvem (Firestore)'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleExportBackup}
-                  className="bg-[#18181c] hover:bg-[#222228] border border-[#2b2b32] text-zinc-300 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all"
-                >
-                  <Download size={14} className="text-[#FF7A00]" />
-                  Exportar Backup Completo (JSON)
-                </button>
-              </div>
-            </div>
-
-            {/* Gerenciamento de Limpeza */}
-            <div className="bg-[#0e0e11] border border-red-500/20 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
-                  <Trash2 size={20} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Zerar Dados Locais</h3>
-                  <p className="text-xs text-zinc-400">
-                    Limpar cache local deste navegador se desejar reiniciar testes ou limpar a máquina.
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm('ATENÇÃO: Deseja limpar os registros locais do navegador?')) {
-                      clearAllData();
-                      setStatusMessage({ text: 'Dados locais limpos com sucesso!', type: 'success' });
-                      setTimeout(() => window.location.reload(), 800);
-                    }
-                  }}
-                  className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all"
-                >
-                  <Trash2 size={15} />
-                  Limpar Dados do Navegador
-                </button>
               </div>
             </div>
           </div>

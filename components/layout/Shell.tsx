@@ -3,12 +3,21 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, X, Wrench, CheckSquare } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, X, Wrench, CheckSquare, LogIn, AlertCircle } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import { useFirebaseData } from '@/hooks/useFirebaseData';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user, authLoading, loginWithEmail, registerWithEmail, logout } = useFirebaseData();
+  
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isLoadingAuth, setIsLoadingAuth] = useState(false);
 
   const navItems = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -18,6 +27,122 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { name: 'Catálogo', href: '/catalogo', icon: Wrench },
     { name: 'Configurações', href: '/configuracoes', icon: Settings },
   ];
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsLoadingAuth(true);
+    try {
+      if (authMode === 'login') {
+        await loginWithEmail(email, password);
+      } else {
+        await registerWithEmail(email, password, name || 'Usuário');
+      }
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-credential') setAuthError('E-mail ou senha incorretos.');
+      else if (err.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está em uso.');
+      else if (err.code === 'auth/weak-password') setAuthError('A senha deve ter pelo menos 6 caracteres.');
+      else setAuthError('Erro na autenticação: ' + err.message);
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#080808]">
+        <div className="w-8 h-8 rounded-full border-2 border-[#FF7A00] border-t-transparent animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#080808] px-4 py-8">
+        <div className="w-full max-w-md bg-[#0e0e11] border border-[#222226] rounded-2xl shadow-2xl p-8 sm:p-10">
+          <div className="flex justify-center mb-8">
+            <Logo variant="compact" size="xl" />
+          </div>
+          
+          <h1 className="text-2xl font-bold text-center text-white mb-2">CRM JC Eletricista</h1>
+          <p className="text-sm text-center text-zinc-400 mb-8">Entre para gerenciar seus orçamentos e clientes.</p>
+
+          <div className="flex items-center gap-2 mb-8 bg-[#141418] p-1.5 rounded-xl">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setAuthError(''); }}
+              className={`flex-1 text-sm font-bold py-2.5 rounded-lg transition-all ${authMode === 'login' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Já tenho conta
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('register'); setAuthError(''); }}
+              className={`flex-1 text-sm font-bold py-2.5 rounded-lg transition-all ${authMode === 'register' ? 'bg-[#222228] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Criar nova conta
+            </button>
+          </div>
+
+          {authError && (
+            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold flex items-center gap-2">
+              <AlertCircle size={16} /> {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAuth} className="space-y-5">
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-sm font-semibold text-zinc-300 mb-2">Seu Nome</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                  placeholder="Ex: Juan Carlos"
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-semibold text-zinc-300 mb-2">E-mail</label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                placeholder="seu@email.com"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-zinc-300 mb-2">Senha</label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                placeholder="••••••••"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoadingAuth}
+              className="w-full bg-[#FF7A00] hover:bg-[#FF8A00] text-black text-sm font-bold px-4 py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md mt-8 disabled:opacity-50"
+            >
+              {isLoadingAuth ? (
+                <div className="w-5 h-5 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+              ) : (
+                <LogIn size={18} />
+              )}
+              {authMode === 'login' ? 'Entrar no Sistema' : 'Criar Conta e Entrar'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden selection:bg-primary selection:text-black">
@@ -101,7 +226,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-3 md:gap-4">
+            <div className="flex items-center gap-3 pr-3 border-r border-[#1f1f23]">
+              <span className="text-xs font-bold text-zinc-300 hidden sm:inline">{user.displayName || user.email}</span>
+              <button
+                onClick={() => logout()}
+                className="text-xs font-bold text-zinc-500 hover:text-red-400 transition-colors"
+              >
+                Sair
+              </button>
+            </div>
             <button className="text-zinc-400 hover:text-[#FF7A00] p-2 rounded-lg hover:bg-[#18181b] transition-colors relative">
               <Bell size={19} />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FF7A00] rounded-full"></span>

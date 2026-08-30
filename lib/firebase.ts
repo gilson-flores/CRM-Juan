@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, type User } from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -98,6 +98,41 @@ export const loginWithGoogle = async (): Promise<User | null> => {
 
 export const logoutUser = async () => {
   await signOut(auth);
+};
+
+export const loginWithEmail = async (email: string, pass: string): Promise<User | null> => {
+  try {
+    const result = await signInWithEmailAndPassword(auth, email, pass);
+    return result.user;
+  } catch (error: any) {
+    console.error('Email Sign In Error:', error);
+    throw error;
+  }
+};
+
+export const registerWithEmail = async (email: string, pass: string, name: string): Promise<User | null> => {
+  try {
+    const result = await createUserWithEmailAndPassword(auth, email, pass);
+    if (result.user) {
+      await updateProfile(result.user, { displayName: name });
+      
+      try {
+        const userRef = doc(db, 'users', result.user.uid);
+        await setDoc(userRef, {
+          id: result.user.uid,
+          email: result.user.email,
+          displayName: name,
+          lastLogin: new Date().toISOString()
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Could not save user profile doc:', e);
+      }
+    }
+    return result.user;
+  } catch (error: any) {
+    console.error('Email Register Error:', error);
+    throw error;
+  }
 };
 
 // ================= COMPANY SETTINGS =================

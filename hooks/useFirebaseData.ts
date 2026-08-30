@@ -5,6 +5,8 @@ import {
   auth, 
   db, 
   loginWithGoogle, 
+  loginWithEmail,
+  registerWithEmail,
   logoutUser, 
   getCompanySettings, 
   saveCompanySettings, 
@@ -219,6 +221,8 @@ export function useFirebaseData() {
     forceSync,
     clearAllData,
     loginGoogle: loginWithGoogle,
+    loginWithEmail,
+    registerWithEmail,
     logout: logoutUser,
     isConnected: true
   };
