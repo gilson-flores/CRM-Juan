@@ -26,9 +26,13 @@ import {
   ShieldAlert,
   ChevronDown,
   ChevronUp,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 import { useGoogleSheets, CatalogItem, APPS_SCRIPT_TEMPLATE } from '@/hooks/useGoogleSheets';
+import { db } from '@/lib/firebase';
+import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { logger } from '@/lib/logger';
 
 export default function CatalogoPage() {
   const { 
@@ -48,6 +52,14 @@ export default function CatalogoPage() {
   // Modal de Item
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<CatalogItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setNotification({ text, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
   const [itemForm, setItemForm] = useState({
     name: '',
     category: 'Instalação',
@@ -129,7 +141,7 @@ export default function CatalogoPage() {
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemForm.name.trim()) {
-      alert('Informe o nome do item ou serviço.');
+      showNotification('Informe o nome do item ou serviço.', 'error');
       return;
     }
 
@@ -137,11 +149,21 @@ export default function CatalogoPage() {
 
     let updatedList: CatalogItem[];
     if (editingItem) {
-      updatedList = catalogItems.map(i => 
-        i.id === editingItem.id 
-          ? { ...i, name: itemForm.name, category: itemForm.category, unitPrice: priceNum, unit: itemForm.unit, description: itemForm.description }
-          : i
-      );
+      const updatedItem: CatalogItem = { 
+        ...editingItem, 
+        name: itemForm.name, 
+        category: itemForm.category, 
+        unitPrice: priceNum, 
+        unit: itemForm.unit, 
+        description: itemForm.description 
+      };
+      updatedList = catalogItems.map(i => i.id === editingItem.id ? updatedItem : i);
+      try {
+        await setDoc(doc(db, 'catalog', String(editingItem.id)), updatedItem, { merge: true });
+      } catch (err) {
+        console.warn('Erro ao salvar item no Firestore:', err);
+      }
+      showNotification('Item atualizado com sucesso!', 'success');
     } else {
       const newItem: CatalogItem = {
         id: `ITM-${(catalogItems.length + 1).toString().padStart(3, '0')}`,
@@ -153,22 +175,61 @@ export default function CatalogoPage() {
         createdAt: new Date().toLocaleDateString('pt-BR')
       };
       updatedList = [newItem, ...catalogItems];
+      try {
+        await setDoc(doc(db, 'catalog', String(newItem.id)), newItem, { merge: true });
+      } catch (err) {
+        console.warn('Erro ao salvar novo item no Firestore:', err);
+      }
+      showNotification('Novo item cadastrado com sucesso!', 'success');
     }
 
     await saveCatalogItems(updatedList);
     setIsModalOpen(false);
   };
 
-  const handleDeleteItem = async (id: string) => {
-    if (confirm('Deseja realmente remover este item do catálogo?')) {
-      const updatedList = catalogItems.filter(i => i.id !== id);
+  const handleDeleteItem = (item: CatalogItem) => {
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDeleteItem = async () => {
+    if (!itemToDelete) return;
+    const target = itemToDelete;
+    setIsDeleting(true);
+
+    try {
+      const updatedList = catalogItems.filter(i => i.id !== target.id);
       await saveCatalogItems(updatedList);
+
+      try {
+        await deleteDoc(doc(db, 'catalog', String(target.id)));
+        logger.info('Catálogo', `Item ${target.name} removido do Firestore`);
+      } catch (err) {
+        console.warn('Erro ao deletar item no Firestore:', err);
+      }
+
+      showNotification(`Item "${target.name}" removido com sucesso.`, 'info');
+    } catch (err: any) {
+      showNotification('Erro ao remover item.', 'error');
+    } finally {
+      setIsDeleting(false);
+      setItemToDelete(null);
     }
   };
 
-  const handleResetDefaultCatalog = async () => {
-    if (confirm('Deseja realmente limpar todos os itens do catálogo?')) {
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  const handleResetDefaultCatalog = () => {
+    setIsResetConfirmOpen(true);
+  };
+
+  const handleConfirmResetCatalog = async () => {
+    try {
       await saveCatalogItems([]);
+      showNotification('Todos os itens do catálogo foram removidos.', 'info');
+    } catch (err) {
+      showNotification('Erro ao limpar catálogo.', 'error');
+    } finally {
+      setIsResetConfirmOpen(false);
     }
   };
 
@@ -287,8 +348,8 @@ export default function CatalogoPage() {
                               <Edit2 size={14} />
                             </button>
                             <button
-                              onClick={() => handleDeleteItem(item.id)}
-                              className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-[#1f1f26] rounded-lg transition-colors"
+                              onClick={() => handleDeleteItem(item)}
+                              className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-[#1f1f26] rounded-lg transition-colors active:scale-95"
                               title="Excluir Item"
                             >
                               <Trash2 size={14} />
@@ -415,6 +476,115 @@ export default function CatalogoPage() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ITEM DO CATÁLOGO */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Excluir Item do Catálogo</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Esta ação removerá o item do catálogo permanentemente.</p>
+              </div>
+            </div>
+
+            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Item:</span>
+                <span className="font-bold text-white truncate max-w-[220px]">{itemToDelete.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Categoria:</span>
+                <span className="text-zinc-200">{itemToDelete.category} ({itemToDelete.unit})</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Preço Padrão:</span>
+                <span className="font-mono font-bold text-[#FF7A00]">
+                  R$ {itemToDelete.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteItem}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+              >
+                <Trash2 size={13} />
+                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAÇÃO DE LIMPEZA GERAL DO CATÁLOGO */}
+      {isResetConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Limpar Todo o Catálogo</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Deseja remover todos os itens cadastrados?</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-400 bg-[#0e0e11] p-3 rounded-xl border border-[#242429]">
+              Esta ação removerá todos os {catalogItems.length} itens da sua lista local e da sincronização.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+              <button
+                type="button"
+                onClick={() => setIsResetConfirmOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResetCatalog}
+                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98]"
+              >
+                <Trash2 size={13} />
+                Limpar Todos os Itens
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST DE NOTIFICAÇÃO */}
+      {notification && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-5 duration-200 border ${
+          notification.type === 'error' 
+            ? 'bg-red-950/90 text-red-200 border-red-800 backdrop-blur-md'
+            : notification.type === 'info'
+            ? 'bg-[#181820]/95 text-zinc-200 border-[#2e2e3a] backdrop-blur-md'
+            : 'bg-emerald-950/90 text-emerald-200 border-emerald-800 backdrop-blur-md'
+        }`}>
+          <span>{notification.text}</span>
+          <button onClick={() => setNotification(null)} className="ml-2 text-zinc-400 hover:text-white p-0.5">
+            <X size={14} />
+          </button>
         </div>
       )}
     </div>

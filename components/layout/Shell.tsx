@@ -1,16 +1,26 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, FileText, Settings, Menu, Search, Bell, X, Wrench, CheckSquare, LogIn, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Settings, Menu, User, X, Wrench, CheckSquare, LogIn, AlertCircle, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { useFirebaseData } from '@/hooks/useFirebaseData';
+import { AdminDiagnosticBar } from '@/components/AdminDiagnosticBar';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const mainScrollRef = useRef<HTMLElement>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, authLoading, loginWithEmail, registerWithEmail, logout } = useFirebaseData();
+  const { user, authLoading, loginWithEmail, registerWithEmail, logout, companySettings } = useFirebaseData();
+  
+  // Auto-scroll to top on route change
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [pathname]);
   
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -23,7 +33,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Clientes', href: '/clientes', icon: Users },
     { name: 'Orçamentos', href: '/orcamentos', icon: FileText },
-    { name: 'Pedidos', href: '/pedidos', icon: CheckSquare },
+    { name: 'Ordens de Serviço', href: '/pedidos', icon: CheckSquare },
     { name: 'Catálogo', href: '/catalogo', icon: Wrench },
     { name: 'Configurações', href: '/configuracoes', icon: Settings },
   ];
@@ -34,15 +44,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
     setIsLoadingAuth(true);
     try {
       if (authMode === 'login') {
-        await loginWithEmail(email, password);
+        await loginWithEmail(email.trim(), password);
       } else {
-        await registerWithEmail(email, password, name || 'Usuário');
+        // Verifica se o administrador autorizou novos cadastros
+        if (companySettings && companySettings.allowRegistrations === false) {
+          setAuthError('Novos cadastros estão temporariamente suspensos pelo administrador do sistema.');
+          setIsLoadingAuth(false);
+          return;
+        }
+        await registerWithEmail(email.trim(), password, name.trim() || 'Usuário');
       }
     } catch (err: any) {
-      if (err.code === 'auth/invalid-credential') setAuthError('E-mail ou senha incorretos.');
-      else if (err.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está em uso.');
-      else if (err.code === 'auth/weak-password') setAuthError('A senha deve ter pelo menos 6 caracteres.');
-      else setAuthError('Erro na autenticação: ' + err.message);
+      const code = err.code || '';
+      if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+        setAuthError('E-mail ou senha incorretos. Se ainda não cadastrou este e-mail neste ambiente, clique em "Criar nova conta".');
+      } else if (code === 'auth/email-already-in-use') {
+        setAuthError('Este e-mail já possui uma conta criada. Clique em "Já tenho conta" para entrar.');
+      } else if (code === 'auth/weak-password') {
+        setAuthError('A senha deve conter no mínimo 6 caracteres.');
+      } else if (code === 'auth/invalid-email') {
+        setAuthError('O formato do e-mail inserido é inválido.');
+      } else {
+        setAuthError('Erro na autenticação: ' + (err.message || 'Verifique seus dados e tente novamente.'));
+      }
     } finally {
       setIsLoadingAuth(false);
     }
@@ -217,43 +241,59 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <Logo variant="compact" />
             </div>
             
-            <div className="hidden md:flex relative items-center">
-              <Search className="absolute left-3 text-zinc-400" size={17} />
-              <input 
-                type="text" 
-                placeholder="Buscar clientes, orçamentos..." 
-                className="w-[320px] bg-[#121214] border border-[#27272a] text-zinc-100 text-xs rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00] transition-all placeholder:text-zinc-400"
-              />
+            {/* Nome do Usuário Logado */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#141418] border border-[#262630] flex items-center justify-center text-[#FF7A00] font-black text-xs shrink-0 shadow-sm">
+                <User size={15} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-white leading-tight truncate max-w-[200px] sm:max-w-[320px]">
+                  {user.displayName || companySettings?.ownerName || (user.email ? user.email.split('@')[0] : 'Usuário')}
+                </span>
+                <span className="text-[10px] text-zinc-400 truncate max-w-[200px] sm:max-w-[320px]">
+                  {user.email}
+                </span>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3 md:gap-4">
-            <div className="flex items-center gap-3 pr-3 border-r border-[#1f1f23]">
-              <span className="text-xs font-bold text-zinc-300 hidden sm:inline">{user.displayName || user.email}</span>
-              <button
-                onClick={() => logout()}
-                className="text-xs font-bold text-zinc-500 hover:text-red-400 transition-colors"
-              >
-                Sair
-              </button>
-            </div>
-            <button className="text-zinc-400 hover:text-[#FF7A00] p-2 rounded-lg hover:bg-[#18181b] transition-colors relative">
-              <Bell size={19} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FF7A00] rounded-full"></span>
-            </button>
-            <Link href="/configuracoes" className="text-zinc-400 hover:text-[#FF7A00] p-2 rounded-lg hover:bg-[#18181b] transition-colors">
+            <Link 
+              href="/configuracoes" 
+              className="text-zinc-400 hover:text-[#FF7A00] p-2 rounded-lg hover:bg-[#18181b] transition-colors flex items-center gap-1.5"
+              title="Configurações"
+            >
               <Settings size={19} />
             </Link>
+            <button
+              onClick={() => logout()}
+              className="text-xs font-bold text-zinc-400 hover:text-red-400 bg-[#141418] hover:bg-[#1f1a1d] border border-[#222228] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Encerrar Sessão"
+            >
+              Sair
+            </button>
           </div>
         </header>
 
         {/* Scrollable Canvas */}
-        <main className="flex-1 overflow-y-auto bg-[#080808] p-4 md:p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto space-y-6">
-            {children}
-          </div>
+        <main ref={mainScrollRef} id="main-content-scroll" className="flex-1 overflow-y-auto bg-[#080808] p-4 md:p-6 lg:p-8 scroll-smooth">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              className="max-w-7xl mx-auto space-y-6"
+            >
+              {children}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
+
+      {/* Admin Diagnostic & Support Live Bar */}
+      <AdminDiagnosticBar userEmail={user?.email} />
     </div>
   );
 }

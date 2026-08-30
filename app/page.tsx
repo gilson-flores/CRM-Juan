@@ -101,7 +101,7 @@ export default function DashboardPage() {
       <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4 mb-6">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight">Painel Principal</h2>
-          <p className="text-xs text-zinc-400 mt-1">Acompanhamento de clientes, orçamentos e pedidos em tempo real.</p>
+          <p className="text-xs text-zinc-400 mt-1">Acompanhamento de clientes, orçamentos e ordens de serviço em tempo real.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <select 
@@ -212,7 +212,7 @@ export default function DashboardPage() {
                     formatter={(value: any) => [`R$ ${formatCurrency(value)}`, '']}
                   />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                  <Bar dataKey="enviados" name="Enviados / Pedidos" stackId="a" fill="#34d399" radius={[0, 0, 4, 4]} />
+                  <Bar dataKey="enviados" name="Enviados / Ordens de Serviço" stackId="a" fill="#34d399" radius={[0, 0, 4, 4]} />
                   <Bar dataKey="rascunhos" name="Rascunhos (Não enviados)" stackId="a" fill="#52525b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

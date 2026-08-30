@@ -42,6 +42,7 @@ export type CompanySettings = {
   doc: string;
   phone: string;
   email: string;
+  instagram?: string;
   address: string;
   pixKey: string;
   pixType: string;
@@ -49,6 +50,8 @@ export type CompanySettings = {
   defaultValidityDays: number;
   defaultObservations: string;
   warrantyTerms: string;
+  allowRegistrations?: boolean;
+  adminAuthKey?: string;
 };
 
 export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
@@ -56,15 +59,18 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   slogan: 'Instalações Residenciais & Comerciais',
   ownerName: 'Juan Carlos',
   doc: '',
-  phone: '(27) 99999-9999',
-  email: 'contato@jceletricista.com',
-  address: 'Vitória - ES',
+  phone: '47 99706-4183',
+  email: '@jc_eletricistajoinville',
+  instagram: '@jc_eletricistajoinville',
+  address: 'Joinville - SC',
   pixKey: '',
   pixType: 'Telefone',
   pixHolder: 'JC Eletricista',
   defaultValidityDays: 15,
   defaultObservations: '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra executada.\n• Materiais sob responsabilidade do cliente, salvo prévio acordo contratual.\n• Pagamento facilitado via PIX ou Cartão em até 12x.',
-  warrantyTerms: 'Garantia legal de 90 dias em conformidade com o Código de Defesa do Consumidor para todos os serviços elétricos prestados.'
+  warrantyTerms: 'Garantia legal de 90 dias em conformidade com o Código de Defesa do Consumidor para todos os serviços elétricos prestados.',
+  allowRegistrations: true,
+  adminAuthKey: 'Davi'
 };
 
 // ================= AUTHENTICATION =================

@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw } from 'lucide-react';
+import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
+import { db } from '@/lib/firebase';
+import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { logger } from '@/lib/logger';
 
 export type Client = {
   id: string;
@@ -30,6 +33,14 @@ export default function ClientesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setNotification({ text, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
 
   const [formData, setFormData] = useState({
     type: 'pf' as 'pf' | 'pj',
@@ -65,9 +76,9 @@ export default function ClientesPage() {
     setIsSyncing(true);
     try {
       await syncAllData();
-      alert('Clientes sincronizados com a Planilha Google com sucesso!');
+      showNotification('Clientes sincronizados com a Planilha Google com sucesso!', 'success');
     } catch (e: any) {
-      alert('Erro na sincronização: ' + e.message);
+      showNotification('Erro na sincronização: ' + e.message, 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -83,21 +94,45 @@ export default function ClientesPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.doc || !formData.phone || !formData.address || !formData.number) {
-      alert('Por favor, preencha todos os campos obrigatórios (*).');
+      showNotification('Por favor, preencha todos os campos obrigatórios (*).', 'error');
       return;
     }
 
     if (editingId) {
-      saveClients(clients.map(c => c.id === editingId ? { ...c, ...formData } as Client : c));
+      const updatedList = clients.map(c => c.id === editingId ? { ...c, ...formData } as Client : c);
+      saveClients(updatedList);
+      try {
+        const updatedClient = updatedList.find(c => c.id === editingId);
+        if (updatedClient) {
+          await setDoc(doc(db, 'clients', String(editingId)), updatedClient, { merge: true });
+        }
+      } catch (err) {
+        console.warn('Erro ao salvar cliente no Firestore:', err);
+      }
+      showNotification('Cliente atualizado com sucesso!', 'success');
     } else {
       const newClient = generateNewClient(formData);
       saveClients([newClient, ...clients]);
+      try {
+        await setDoc(doc(db, 'clients', String(newClient.id)), newClient, { merge: true });
+      } catch (err) {
+        console.warn('Erro ao salvar novo cliente no Firestore:', err);
+      }
+      showNotification('Cliente cadastrado com sucesso!', 'success');
     }
     
     closeModal();
+    if (typeof window !== 'undefined') {
+      const scrollContainer = document.getElementById('main-content-scroll');
+      if (scrollContainer) {
+        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
   };
 
   const handleEdit = (client: Client) => {
@@ -116,9 +151,32 @@ export default function ClientesPage() {
     setModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este cliente?')) {
-      saveClients(clients.filter(c => c.id !== id));
+  const handleDelete = (client: Client) => {
+    setClientToDelete(client);
+  };
+
+  const handleConfirmDeleteClient = async () => {
+    if (!clientToDelete) return;
+    const target = clientToDelete;
+    setIsDeleting(true);
+
+    try {
+      const updatedList = clients.filter(c => c.id !== target.id);
+      saveClients(updatedList);
+
+      try {
+        await deleteDoc(doc(db, 'clients', String(target.id)));
+        logger.info('Clientes', `Cliente ${target.name} removido do Firestore`);
+      } catch (err) {
+        console.warn('Erro ao remover cliente do Firestore:', err);
+      }
+
+      showNotification(`Cliente "${target.name}" excluído com sucesso.`, 'info');
+    } catch (err: any) {
+      showNotification('Erro ao excluir cliente.', 'error');
+    } finally {
+      setIsDeleting(false);
+      setClientToDelete(null);
     }
   };
 
@@ -241,7 +299,7 @@ export default function ClientesPage() {
                       <button onClick={() => handleEdit(client)} className="text-on-surface-variant hover:text-primary transition-colors p-1">
                         <Edit size={18} />
                       </button>
-                      <button onClick={() => handleDelete(client.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                      <button onClick={() => handleDelete(client)} className="text-on-surface-variant hover:text-error transition-colors p-1 active:scale-95" title="Excluir Cliente">
                         <Trash2 size={18} />
                       </button>
                     </div>
@@ -411,6 +469,74 @@ export default function ClientesPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE CLIENTE */}
+      {clientToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Excluir Cliente</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Esta ação removerá o cliente permanentemente.</p>
+              </div>
+            </div>
+
+            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Nome:</span>
+                <span className="font-bold text-white truncate max-w-[220px]">{clientToDelete.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Documento:</span>
+                <span className="font-mono text-zinc-200 uppercase">{clientToDelete.type}: {clientToDelete.doc}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Telefone:</span>
+                <span className="text-zinc-300">{clientToDelete.phone}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+              <button
+                type="button"
+                onClick={() => setClientToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteClient}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+              >
+                <Trash2 size={13} />
+                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST DE NOTIFICAÇÃO */}
+      {notification && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-5 duration-200 border ${
+          notification.type === 'error' 
+            ? 'bg-red-950/90 text-red-200 border-red-800 backdrop-blur-md'
+            : notification.type === 'info'
+            ? 'bg-[#181820]/95 text-zinc-200 border-[#2e2e3a] backdrop-blur-md'
+            : 'bg-emerald-950/90 text-emerald-200 border-emerald-800 backdrop-blur-md'
+        }`}>
+          <span>{notification.text}</span>
+          <button onClick={() => setNotification(null)} className="ml-2 text-zinc-400 hover:text-white p-0.5">
+            <X size={14} />
+          </button>
         </div>
       )}
     </>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Save, 
   FileDown, 
@@ -17,11 +17,23 @@ import {
   X, 
   Printer, 
   Search,
-  BookOpen
+  BookOpen,
+  Send,
+  FileText,
+  FileEdit,
+  Clock,
+  CheckCircle2,
+  Filter,
+  Layers,
+  ArrowUpRight,
+  AlertTriangle
 } from 'lucide-react';
 import type { Client } from '../clientes/page';
 import { useGoogleSheets, CatalogItem } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
+import { db } from '@/lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { logger } from '@/lib/logger';
 
 // Helper para gerar identificadores únicos de forma segura
 let globalItemCounter = 1;
@@ -76,10 +88,67 @@ export default function OrcamentosPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
 
+  // Estados de filtro e busca para a lista de orçamentos (separação rascunhos x enviados)
+  const [listFilter, setListFilter] = useState<'todos' | 'rascunhos' | 'enviados'>('todos');
+  const [listSearch, setListSearch] = useState('');
+
   // Modais
   const [isDraftsModalOpen, setIsDraftsModalOpen] = useState(false);
   const [isCatalogModalOpen, setIsCatalogModalOpen] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewModalPage, setPreviewModalPage] = useState<'ambas' | 'orcamento' | 'garantia'>('ambas');
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [previewTab, setPreviewTab] = useState<'orcamento' | 'garantia'>('orcamento');
+  const [includeWarranty, setIncludeWarranty] = useState(true);
+  const [quoteToDelete, setQuoteToDelete] = useState<FullDraft | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Seletores calculados para orçamentos separados
+  const rascunhosList = useMemo(() => {
+    return savedDrafts.filter(d => !d.status || d.status === 'rascunho');
+  }, [savedDrafts]);
+
+  const enviadosList = useMemo(() => {
+    return savedDrafts.filter(d => d.status === 'enviado' || d.status === 'pedido' || d.status === 'concluido');
+  }, [savedDrafts]);
+
+  const filteredQuotesList = useMemo(() => {
+    return savedDrafts.filter(draft => {
+      const searchLower = listSearch.toLowerCase();
+      const matchesSearch = 
+        !listSearch ||
+        (draft.clientName || '').toLowerCase().includes(searchLower) ||
+        (draft.quoteNumber || '').toLowerCase().includes(searchLower) ||
+        (draft.items || []).some(it => it.description.toLowerCase().includes(searchLower));
+      
+      if (!matchesSearch) return false;
+      
+      if (listFilter === 'rascunhos') {
+        return !draft.status || draft.status === 'rascunho';
+      }
+      if (listFilter === 'enviados') {
+        return draft.status === 'enviado' || draft.status === 'pedido' || draft.status === 'concluido';
+      }
+      return true;
+    });
+  }, [savedDrafts, listFilter, listSearch]);
+
+  const stats = useMemo(() => {
+    const totalCount = savedDrafts.length;
+    const rascunhosCount = rascunhosList.length;
+    const enviadosCount = enviadosList.length;
+    const totalValue = savedDrafts.reduce((acc, d) => acc + (d.total || 0), 0);
+    const rascunhosValue = rascunhosList.reduce((acc, d) => acc + (d.total || 0), 0);
+    const enviadosValue = enviadosList.reduce((acc, d) => acc + (d.total || 0), 0);
+    return {
+      totalCount,
+      rascunhosCount,
+      enviadosCount,
+      totalValue,
+      rascunhosValue,
+      enviadosValue
+    };
+  }, [savedDrafts, rascunhosList, enviadosList]);
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ text, type });
@@ -90,11 +159,23 @@ export default function OrcamentosPage() {
     const savedClients = localStorage.getItem('@jc-eletricista:clients');
     const savedDraftsList = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
     const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
+    const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
 
     const timer = setTimeout(() => {
       // Gerar número de orçamento inicial caso seja padrão
       const randomSuffix = Math.floor(1000 + Math.random() * 9000);
       setQuoteNumber(`2026-${randomSuffix}`);
+
+      if (savedSettings) {
+        try {
+          const parsedSettings = JSON.parse(savedSettings);
+          let defaultText = parsedSettings.defaultObservations || '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra.\n• Materiais por conta do contratante, salvo acordo prévio.';
+          if (parsedSettings.pixKey && !defaultText.includes(parsedSettings.pixKey)) {
+            defaultText += `\n• Chave PIX (${parsedSettings.pixType || 'Chave'}): ${parsedSettings.pixKey} [${parsedSettings.pixHolder || parsedSettings.ownerName || 'JC Eletricista'}]`;
+          }
+          setObservations(defaultText);
+        } catch {}
+      }
 
       if (savedClients) {
         try { setClients(JSON.parse(savedClients)); } catch {}
@@ -180,7 +261,8 @@ export default function OrcamentosPage() {
       observations,
       total,
       date: dateFormatted,
-      savedAt: `${dateFormatted} às ${timeFormatted}`
+      savedAt: `${dateFormatted} às ${timeFormatted}`,
+      status: 'rascunho'
     };
 
     // Atualizar lista de rascunhos
@@ -213,6 +295,14 @@ export default function OrcamentosPage() {
 
     setIsSyncing(false);
     showNotification('Rascunho e itens salvos com sucesso!');
+    if (typeof window !== 'undefined') {
+      const scrollContainer = document.getElementById('main-content-scroll');
+      if (scrollContainer) {
+        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
   };
 
   // 2. RESTAURAR RASCUNHO
@@ -225,16 +315,103 @@ export default function OrcamentosPage() {
     setObservations(draft.observations || '');
     setIsDraftsModalOpen(false);
     showNotification(`Rascunho de "${draft.clientName}" restaurado com sucesso!`);
+    if (typeof window !== 'undefined') {
+      const scrollContainer = document.getElementById('main-content-scroll');
+      if (scrollContainer) {
+        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
   };
 
-  const handleDeleteDraft = (e: React.MouseEvent, id: string) => {
+  const handleDeleteDraft = (e: React.MouseEvent, draft: FullDraft) => {
     e.stopPropagation();
-    if (confirm('Deseja excluir este rascunho?')) {
-      const filtered = savedDrafts.filter(d => d.id !== id);
+    setQuoteToDelete(draft);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!quoteToDelete) return;
+    const target = quoteToDelete;
+    setIsDeleting(true);
+
+    try {
+      // 1. Atualiza estado local imediatamente para feedback reativo instantâneo
+      const filtered = savedDrafts.filter(d => d.id !== target.id);
       setSavedDrafts(filtered);
       localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(filtered));
-      showNotification('Rascunho excluído.', 'info');
+
+      // 2. Remove do Firestore de forma assíncrona
+      try {
+        await deleteDoc(doc(db, 'quotes', String(target.id)));
+        logger.info('Orçamentos', `Orçamento #${target.quoteNumber} excluído com sucesso do Firestore.`);
+      } catch (firestoreErr: any) {
+        logger.warn('Orçamentos', `Aviso ao deletar do Firestore: ${firestoreErr?.message || firestoreErr}`);
+      }
+
+      // 3. Sincroniza com Google Sheets se conectado
+      if (isConnected) {
+        syncAllData().catch(err => console.warn('Falha na sincronização após exclusão:', err));
+      }
+
+      showNotification(`Orçamento #${target.quoteNumber} excluído com sucesso.`, 'info');
+    } catch (err: any) {
+      logger.error('Orçamentos', 'Erro ao excluir orçamento', err?.message || err);
+      showNotification('Erro ao excluir o orçamento.', 'error');
+    } finally {
+      setIsDeleting(false);
+      setQuoteToDelete(null);
     }
+  };
+
+  // Gerar PDF diretamente de qualquer orçamento da lista
+  const handleGeneratePdfFromDraft = async (e: React.MouseEvent, draft: FullDraft) => {
+    e.stopPropagation();
+    try {
+      const clientData = clients.find(c => c.name === draft.clientName);
+      const localSettings = localStorage.getItem('@jc-eletricista:company_settings');
+      const companySettings = localSettings ? JSON.parse(localSettings) : undefined;
+      const subtotalCalc = (draft.items || []).reduce((acc, it) => acc + (it.quantity * it.unitPrice), 0);
+
+      await generateQuotePdf({
+        quoteNumber: draft.quoteNumber,
+        date: draft.date || new Date().toLocaleDateString('pt-BR'),
+        clientName: draft.clientName || 'Cliente',
+        clientDoc: clientData?.doc,
+        clientPhone: clientData?.phone,
+        clientEmail: clientData?.email,
+        address: draft.address || clientData?.address || '',
+        items: draft.items || [],
+        subtotal: subtotalCalc,
+        discount: draft.discount || 0,
+        total: draft.total,
+        observations: draft.observations,
+        companySettings,
+        includeWarranty: includeWarranty,
+        documentType: 'orcamento'
+      });
+
+      // Atualiza status para 'enviado' se for rascunho
+      if (!draft.status || draft.status === 'rascunho') {
+        const updated = savedDrafts.map(d => d.id === draft.id ? { ...d, status: 'enviado' as const } : d);
+        setSavedDrafts(updated);
+        localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
+      }
+
+      showNotification(`PDF do orçamento #${draft.quoteNumber} gerado com sucesso!`);
+    } catch (err) {
+      showNotification('Erro ao gerar PDF do orçamento.', 'error');
+    }
+  };
+
+  // Alternar status manualmente entre Rascunho e Enviado
+  const handleToggleStatus = (e: React.MouseEvent, draftId: string, currentStatus?: string) => {
+    e.stopPropagation();
+    const newStatus = currentStatus === 'enviado' ? 'rascunho' : 'enviado';
+    const updated = savedDrafts.map(d => d.id === draftId ? { ...d, status: newStatus as any } : d);
+    setSavedDrafts(updated);
+    localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
+    showNotification(`Status alterado para ${newStatus === 'enviado' ? 'Enviado' : 'Rascunho'}.`, 'info');
   };
 
   // 3. GERAR PDF COMPATÍVEL COM ANDROID & IOS
@@ -261,7 +438,9 @@ export default function OrcamentosPage() {
       discount,
       total,
       observations,
-      companySettings
+      companySettings,
+      includeWarranty,
+      documentType: 'orcamento'
     });
 
     // Update status to enviado
@@ -292,6 +471,38 @@ export default function OrcamentosPage() {
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
 
     showNotification('PDF gerado com sucesso! Arquivo pronto para impressão ou WhatsApp.');
+  };
+
+  // Print screen handler updating status to enviado
+  const handlePrintScreen = () => {
+    // Update status to enviado
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('pt-BR');
+    const timeFormatted = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const existingDraftIndex = savedDrafts.findIndex(d => d.quoteNumber === quoteNumber);
+    let updatedDrafts = [...savedDrafts];
+    
+    if (existingDraftIndex >= 0) {
+      updatedDrafts[existingDraftIndex] = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+    } else {
+      updatedDrafts = [{
+        id: generateItemId('DRAFT'),
+        quoteNumber,
+        clientName: selectedClient || 'Cliente',
+        address,
+        items,
+        discount,
+        observations,
+        total,
+        date: dateFormatted,
+        savedAt: `${dateFormatted} às ${timeFormatted}`,
+        status: 'enviado'
+      }, ...savedDrafts];
+    }
+    setSavedDrafts(updatedDrafts);
+    localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
+    
+    window.print();
   };
 
   const filteredCatalog = catalogItems.filter(item =>
@@ -328,25 +539,35 @@ export default function OrcamentosPage() {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          {/* Botão Ver Lista / Histórico */}
+          <button
+            type="button"
+            onClick={() => setIsDraftsModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 bg-[#141418] hover:bg-[#1f1f26] text-zinc-300 hover:text-white border border-[#2d2d38] px-3.5 py-2 rounded-lg text-xs font-bold transition-all active:scale-[0.98]"
+          >
+            <History size={15} className="text-[#FF7A00]" />
+            <span>Orçamentos Salvos ({savedDrafts.length})</span>
+          </button>
+
           {/* Salvar Rascunho */}
           <button 
             type="button"
             onClick={handleSaveDraft}
             disabled={isSyncing}
-            className="flex items-center justify-center gap-1.5 border border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00]/10 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 border border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00]/10 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all active:scale-[0.98] disabled:opacity-50"
           >
             {isSyncing ? <Cloud size={15} className="animate-pulse" /> : <Save size={15} />}
             {isSyncing ? 'Salvando...' : 'Salvar Rascunho'}
           </button>
           
-          {/* Gerar PDF / Imprimir (Android & iOS) */}
+          {/* Pré-visualizar Orçamento (Apenas Conferir - Não Salva) */}
           <button 
             type="button"
-            onClick={handleGeneratePdf}
-            className="flex items-center justify-center gap-1.5 bg-[#FF7A00] hover:bg-[#FF8A00] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-[#FF7A00]/20"
+            onClick={() => setIsPreviewModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 bg-[#FF7A00] hover:bg-[#FF8A00] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all active:scale-[0.98] shadow-lg shadow-[#FF7A00]/20"
           >
-            <FileDown size={16} />
-            Baixar / Imprimir PDF
+            <Eye size={16} />
+            Pré-visualizar Orçamento
           </button>
         </div>
       </header>
@@ -356,44 +577,8 @@ export default function OrcamentosPage() {
         
         {/* Form Editor (Left Column) */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
-          
-          
-          {/* Rascunhos Salvos Area */}
-          {savedDrafts.length > 0 && (
-            <section className="bg-surface-container rounded border border-outline-variant p-4">
-              <h2 className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
-                <History className="text-[#FF7A00]" size={18} />
-                Meus Rascunhos Salvos
-              </h2>
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
-                {savedDrafts.map(draft => (
-                  <div key={draft.id} className="min-w-[260px] p-3 bg-[#0e0e11] border border-[#242429] hover:border-[#FF7A00]/50 rounded-xl flex flex-col gap-2 shrink-0 transition-colors">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="text-xs font-bold text-white truncate max-w-[150px]">{draft.clientName}</h4>
-                        <span className="text-[10px] text-zinc-500 font-mono">#{draft.quoteNumber}</span>
-                      </div>
-                      <span className="text-xs font-bold text-[#FF7A00] font-mono">R$ {formatCurrency(draft.total)}</span>
-                    </div>
-                    <div className="text-[10px] text-zinc-400 truncate">
-                      {draft.items?.length || 0} itens • {draft.savedAt}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 border-t border-[#242429] pt-2">
-                      <button onClick={() => handleRestoreDraft(draft)} className="flex-1 bg-[#18181c] hover:bg-[#242429] text-zinc-300 text-[10px] font-bold py-1.5 rounded transition-colors">
-                        Resgatar
-                      </button>
-                      <button onClick={(e) => handleDeleteDraft(e, draft.id)} className="px-2 text-zinc-500 hover:text-red-400 hover:bg-[#242429] py-1.5 rounded transition-colors">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
 
           {/* Client Details Card */}
-
           <section className="bg-surface-container rounded border border-outline-variant p-5">
             <h2 className="text-sm font-bold text-on-surface mb-3.5 flex items-center gap-2">
               <User className="text-primary" size={18} />
@@ -557,18 +742,58 @@ export default function OrcamentosPage() {
           </section>
 
           {/* Observations */}
-          <section className="bg-surface-container rounded border border-outline-variant p-5">
-            <h2 className="text-sm font-bold text-on-surface mb-2.5 flex items-center gap-2">
-              <AlignLeft className="text-primary" size={18} />
-              Observações & Condições de Pagamento
-            </h2>
+          <section className="bg-[#0e0e11] rounded-2xl border border-[#202028] p-5 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                <AlignLeft className="text-[#FF7A00]" size={16} />
+                Observações & Condições de Pagamento
+              </h2>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                Texto incluído no PDF / Prévia
+              </span>
+            </div>
             <textarea 
-              rows={3}
+              rows={4}
               value={observations}
               onChange={(e) => setObservations(e.target.value)}
-              className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-xs text-on-surface focus:outline-none focus:border-primary transition-colors placeholder:text-on-surface-variant leading-relaxed" 
-              placeholder="Validade do orçamento, prazos, formas de pagamento..."
+              className="w-full bg-[#141418] border border-[#262630] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/30 transition-all placeholder:text-zinc-500 leading-relaxed font-sans resize-y" 
+              placeholder="Validade do orçamento, prazos, formas de pagamento, garantia..."
             />
+          </section>
+
+          {/* Opção de Termo de Garantia no Orçamento */}
+          <section className="bg-[#0e0e11] rounded-2xl border border-[#202028] p-4 shadow-lg flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#FF7A00]/10 border border-[#FF7A00]/20 flex items-center justify-center text-[#FF7A00] shrink-0">
+                <BookOpen size={18} />
+              </div>
+              <div>
+                <label htmlFor="include-warranty-checkbox" className="text-xs font-bold text-white cursor-pointer select-none block">
+                  Adicionar termo de garantia no orçamento?
+                </label>
+                <p className="text-[11px] text-zinc-400">
+                  {includeWarranty 
+                    ? 'Sim • Gera a 2ª página com os termos jurídicos e normas ABNT NBR 5410 / NR-10.' 
+                    : 'Não • O orçamento será gerado em página única sem os termos de garantia.'}
+                </p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input 
+                id="include-warranty-checkbox"
+                type="checkbox" 
+                checked={includeWarranty}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIncludeWarranty(checked);
+                  if (!checked && previewTab === 'garantia') {
+                    setPreviewTab('orcamento');
+                  }
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-[#202028] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FF7A00]"></div>
+            </label>
           </section>
         </div>
 
@@ -576,100 +801,215 @@ export default function OrcamentosPage() {
         <div className="lg:col-span-5 xl:col-span-4 sticky top-6">
           <div className="bg-surface-container rounded border border-outline-variant overflow-hidden flex flex-col shadow-2xl shadow-black/60">
             {/* Preview Header */}
-            <div className="bg-surface-container-highest p-3.5 border-b border-outline-variant flex justify-between items-center shrink-0">
-              <h3 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-1.5">
-                <Eye size={16} className="text-[#FF7A00]" />
-                Prévia Oficial A4
-              </h3>
+            <div className="bg-surface-container-highest p-3 border-b border-outline-variant flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-1 bg-[#141418] p-1 rounded-lg border border-[#27272e]">
+                <button
+                  type="button"
+                  onClick={() => setPreviewTab('orcamento')}
+                  className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
+                    previewTab === 'orcamento'
+                      ? 'bg-[#FF7A00] text-black shadow-sm'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Pág 1: Orçamento
+                </button>
+                {includeWarranty ? (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('garantia')}
+                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
+                      previewTab === 'garantia'
+                        ? 'bg-[#FF7A00] text-black shadow-sm'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Pág 2: Termos de Garantia
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIncludeWarranty(true);
+                      setPreviewTab('garantia');
+                    }}
+                    title="Clique para ativar e visualizar os termos de garantia"
+                    className="px-2.5 py-1 rounded text-[10px] font-medium text-zinc-500 hover:text-zinc-300 transition-all border border-dashed border-zinc-700/50"
+                  >
+                    + Ativar Pág 2
+                  </button>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={handlePrintScreen}
                   title="Imprimir tela"
                   className="p-1 text-zinc-400 hover:text-white transition-colors"
                 >
                   <Printer size={15} />
                 </button>
                 <span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-primary/20">
-                  A4 Timbrado
+                  {includeWarranty 
+                    ? (previewTab === 'orcamento' ? '1/2 Timbrado' : '2/2 Garantia')
+                    : '1/1 Orçamento'}
                 </span>
               </div>
             </div>
             
             {/* "Paper" Area */}
-            <div className="p-5 bg-white text-gray-900 m-3 rounded-lg shadow-inner border border-gray-300 text-[11px] leading-tight select-none">
+            <div className="p-5 bg-white text-gray-900 m-3 rounded-lg shadow-inner border border-gray-300 text-[11px] leading-tight select-none min-h-[480px] flex flex-col justify-between">
               
-              {/* Header Box */}
-              <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
+              {previewTab === 'orcamento' ? (
                 <div>
-                  <h1 className="text-base font-black uppercase text-gray-900 tracking-tight">JC Eletricista</h1>
-                  <p className="text-[9px] text-[#ea580c] font-bold">Serviços Elétricos Profissionais</p>
-                  <p className="text-[8px] text-gray-500">Residencial • Comercial • Padrão</p>
-                </div>
-                <div className="text-right">
-                  <span className="inline-block bg-gray-900 text-white font-black text-[9px] px-2 py-0.5 rounded uppercase">Orçamento</span>
-                  <p className="text-[9px] text-gray-600 font-mono mt-1">Nº {quoteNumber}</p>
-                  <p className="text-[8px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</p>
-                </div>
-              </div>
-
-              {/* Client Info */}
-              <div className="bg-gray-50 p-2.5 rounded border border-gray-200 mb-3">
-                <p className="text-[8px] font-bold uppercase text-gray-400">Cliente / Local:</p>
-                <p className="text-xs font-bold text-gray-900">{selectedClient || 'Nome do Cliente'}</p>
-                <p className="text-[9px] text-gray-600 truncate">{address || 'Endereço da Obra'}</p>
-              </div>
-
-              {/* Items Table */}
-              <table className="w-full text-[9px] text-left mb-3">
-                <thead className="border-b border-gray-300 text-gray-500 uppercase">
-                  <tr>
-                    <th className="py-1">Item</th>
-                    <th className="py-1 text-center">Qtd</th>
-                    <th className="py-1 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="text-gray-800 divide-y divide-gray-100">
-                  {items.length > 0 ? items.map((item, idx) => (
-                    <tr key={item.id}>
-                      <td className="py-1 pr-1 font-medium">{idx + 1}. {item.description}</td>
-                      <td className="py-1 text-center font-mono">{item.quantity}</td>
-                      <td className="py-1 text-right font-mono font-semibold">R$ {formatCurrency(item.quantity * item.unitPrice)}</td>
-                    </tr>
-                  )) : (
-                    <tr><td colSpan={3} className="py-3 text-center text-gray-400 italic">Nenhum item adicionado.</td></tr>
-                  )}
-                </tbody>
-              </table>
-
-              {/* Totals */}
-              <div className="flex justify-end border-t border-gray-300 pt-2 mb-3">
-                <div className="w-40 text-right space-y-1">
-                  <div className="flex justify-between text-[9px] text-gray-600">
-                    <span>Subtotal:</span>
-                    <span>R$ {formatCurrency(subtotal)}</span>
+                  {/* Header Box */}
+                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
+                    <div className="flex items-center gap-3">
+                      <img 
+                        src="/logo.svg" 
+                        alt="Logo JC Eletricista" 
+                        className="w-12 h-12 rounded-lg object-contain shrink-0 shadow-sm border border-[#26262e] bg-[#0c0c0f]" 
+                      />
+                      <div>
+                        <h1 className="text-sm font-black uppercase text-gray-900 tracking-tight">JC ELETRICISTA</h1>
+                        <p className="text-[9px] text-[#ea580c] font-bold">Serviços Elétricos Profissionais</p>
+                        <p className="text-[8px] text-gray-500">Residencial • Comercial • Padrão</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block bg-gray-900 text-white font-black text-[9px] px-2 py-0.5 rounded uppercase">Orçamento</span>
+                      <p className="text-[9px] text-gray-600 font-mono mt-1">Nº {quoteNumber}</p>
+                      <p className="text-[8px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</p>
+                    </div>
                   </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-[9px] text-red-600">
-                      <span>Desconto:</span>
-                      <span>- R$ {formatCurrency(discount)}</span>
+
+                  {/* Client Info */}
+                  <div className="bg-gray-50 p-2.5 rounded border border-gray-200 mb-3">
+                    <p className="text-[8px] font-bold uppercase text-gray-400">Cliente / Local:</p>
+                    <p className="text-xs font-bold text-gray-900">{selectedClient || 'Nome do Cliente'}</p>
+                    <p className="text-[9px] text-gray-600 truncate">{address || 'Endereço da Obra'}</p>
+                  </div>
+
+                  {/* Items Table */}
+                  <table className="w-full text-[9px] text-left mb-3">
+                    <thead className="border-b border-gray-300 text-gray-500 uppercase">
+                      <tr>
+                        <th className="py-1">Item</th>
+                        <th className="py-1 text-center">Qtd</th>
+                        <th className="py-1 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-gray-800 divide-y divide-gray-100">
+                      {items.length > 0 ? items.map((item, idx) => (
+                        <tr key={item.id}>
+                          <td className="py-1 pr-1 font-medium">{idx + 1}. {item.description}</td>
+                          <td className="py-1 text-center font-mono">{item.quantity}</td>
+                          <td className="py-1 text-right font-mono font-semibold">R$ {formatCurrency(item.quantity * item.unitPrice)}</td>
+                        </tr>
+                      )) : (
+                        <tr><td colSpan={3} className="py-3 text-center text-gray-400 italic">Nenhum item adicionado.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+
+                  {/* Totals */}
+                  <div className="flex justify-end border-t border-gray-300 pt-2 mb-3">
+                    <div className="w-40 text-right space-y-1">
+                      <div className="flex justify-between text-[9px] text-gray-600">
+                        <span>Subtotal:</span>
+                        <span>R$ {formatCurrency(subtotal)}</span>
+                      </div>
+                      {discount > 0 && (
+                        <div className="flex justify-between text-[9px] text-red-600">
+                          <span>Desconto:</span>
+                          <span>- R$ {formatCurrency(discount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-xs font-black text-gray-900 border-t border-gray-200 pt-1">
+                        <span>Total:</span>
+                        <span className="text-[#ea580c]">R$ {formatCurrency(total)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Observations & Terms */}
+                  {observations && (
+                    <div className="mb-3 pt-2 border-t border-gray-200 text-[8px] text-gray-600 leading-tight">
+                      <p className="font-bold uppercase text-gray-400 mb-0.5">Observações & Condições:</p>
+                      <p className="whitespace-pre-line">{observations}</p>
                     </div>
                   )}
-                  <div className="flex justify-between text-xs font-black text-gray-900 border-t border-gray-200 pt-1">
-                    <span>Total:</span>
-                    <span className="text-[#ea580c]">R$ {formatCurrency(total)}</span>
+                </div>
+              ) : (
+                <div>
+                  {/* Header Box Garantia */}
+                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-lg bg-black border border-[#FF7A00]/40 flex flex-col items-center justify-center p-1 shrink-0 shadow-sm text-center">
+                        <span className="font-black italic text-base leading-none text-[#FF7A00]">JC</span>
+                        <span className="text-[5px] font-black text-white uppercase tracking-wider mt-0.5">ELETRICISTA</span>
+                        <span className="text-[4px] text-[#FF7A00] leading-none">residencial/comercial</span>
+                      </div>
+                      <div>
+                        <h1 className="text-sm font-black uppercase text-gray-900 tracking-tight">TERMO DE GARANTIA</h1>
+                        <p className="text-[9px] text-[#ea580c] font-bold">ABNT NBR 5410 & NR-10</p>
+                        <p className="text-[8px] text-gray-500">47 99706-4183 • jc_eletricistajoinville</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block bg-[#ea580c] text-white font-black text-[8px] px-2 py-0.5 rounded uppercase">Certificado</span>
+                      <p className="text-[9px] text-gray-600 font-mono mt-1">Ref: {quoteNumber}</p>
+                      <p className="text-[8px] text-gray-500">Pág 2 de 2</p>
+                    </div>
+                  </div>
+
+                  {/* Client Info */}
+                  <div className="bg-gray-50 p-2 rounded border border-gray-200 mb-2.5 text-[8px]">
+                    <span className="font-bold text-gray-700">Contratante:</span> <span className="text-gray-900 font-semibold">{selectedClient || 'Cliente'}</span>
+                    <span className="mx-2 text-gray-300">•</span>
+                    <span className="font-bold text-gray-700">Local:</span> <span className="text-gray-600">{address || 'Conforme orçamento'}</span>
+                  </div>
+
+                  {/* Clauses List */}
+                  <div className="space-y-2 text-[8px] text-gray-700 leading-snug border border-gray-200 rounded p-2.5 bg-gray-50/50 mb-3">
+                    <div>
+                      <p className="font-bold text-[#ea580c]">1. PRAZO E COBERTURA LEGAL</p>
+                      <p className="text-gray-600">Garantia legal de 90 (noventa) dias sobre a mão de obra especializada conforme Art. 26 do CDC.</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#ea580c]">2. NORMAS TÉCNICAS APLICADAS</p>
+                      <p className="text-gray-600">Execução rigorosa em conformidade com as normas ABNT NBR 5410 e NR-10 de segurança.</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#ea580c]">3. CONDIÇÕES PARA VALIDADE</p>
+                      <p className="text-gray-600">Utilização de materiais certificados INMETRO e respeito ao dimensionamento dos disjuntores e condutores.</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#ea580c]">4. EXCLUSÕES DE COBERTURA</p>
+                      <p className="text-gray-600">Intervenções de terceiros não autorizados, sobrecargas não previstas e descargas atmosféricas sem DPS.</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#ea580c]">5. SUPORTE TÉCNICO</p>
+                      <p className="text-gray-600">Acionamento imediato via WhatsApp oficial (47 99706-4183) para vistoria e assistência prioritária.</p>
+                    </div>
+                  </div>
+
+                  {/* Signatures preview */}
+                  <div className="pt-2 border-t border-gray-200 flex justify-between text-[7px] text-gray-500 text-center">
+                    <div className="w-28 border-t border-gray-400 pt-1">JC ELETRICISTA</div>
+                    <div className="w-28 border-t border-gray-400 pt-1">Cliente / Aceite</div>
                   </div>
                 </div>
-              </div>
+              )}
 
-              {/* Export CTA */}
+              {/* Preview CTA */}
               <button
                 type="button"
-                onClick={handleGeneratePdf}
-                className="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white py-2 rounded font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow"
+                onClick={() => setIsPreviewModalOpen(true)}
+                className="w-full bg-[#FF7A00] hover:bg-[#FF8A00] text-black py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#FF7A00]/20 active:scale-[0.98] mt-3"
               >
-                <FileDown size={14} />
-                Baixar PDF Oficial
+                <Eye size={15} />
+                Pré-visualizar Orçamento
               </button>
             </div>
           </div>
@@ -677,14 +1017,14 @@ export default function OrcamentosPage() {
 
       </div>
 
-      {/* MODAL: RESTAURAR RASCUNHO */}
+      {/* MODAL: RESTAURAR RASCUNHO / HISTÓRICO DE ORÇAMENTOS */}
       {isDraftsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]">
             <div className="flex justify-between items-center p-5 border-b border-[#242429]">
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 <History size={18} className="text-[#FF7A00]" />
-                <span>Rascunhos Salvos ({savedDrafts.length})</span>
+                <span>Histórico de Orçamentos ({savedDrafts.length})</span>
               </div>
               <button
                 onClick={() => setIsDraftsModalOpen(false)}
@@ -694,44 +1034,155 @@ export default function OrcamentosPage() {
               </button>
             </div>
 
-            <div className="p-5 max-h-[60vh] overflow-y-auto space-y-3">
-              {savedDrafts.length > 0 ? (
-                savedDrafts.map(draft => (
-                  <div 
-                    key={draft.id} 
-                    onClick={() => handleRestoreDraft(draft)}
-                    className="p-4 bg-[#0e0e11] hover:bg-[#18181f] border border-[#242429] hover:border-[#FF7A00]/40 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 group"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-xs font-bold text-white truncate">{draft.clientName}</h4>
-                        <span className="text-[10px] font-mono text-zinc-500">#{draft.quoteNumber}</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 mt-0.5 truncate">
-                        {draft.items?.length || 0} itens • {draft.items?.map(i => i.description).join(', ')}
-                      </p>
-                      <p className="text-[10px] text-zinc-500 mt-1">Salvo em {draft.savedAt}</p>
-                    </div>
+            {/* Abas e Filtro no Modal */}
+            <div className="p-4 border-b border-[#242429] bg-[#0e0e11] flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+              <div className="flex items-center bg-[#141418] p-1 rounded-xl border border-[#202028] gap-1">
+                <button
+                  type="button"
+                  onClick={() => setListFilter('todos')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    listFilter === 'todos'
+                      ? 'bg-[#FF7A00] text-black shadow'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Todos ({stats.totalCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListFilter('rascunhos')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    listFilter === 'rascunhos'
+                      ? 'bg-amber-500 text-black shadow'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Clock size={12} />
+                  Rascunhos ({stats.rascunhosCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListFilter('enviados')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    listFilter === 'enviados'
+                      ? 'bg-blue-500 text-white shadow'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Send size={12} />
+                  Enviados ({stats.enviadosCount})
+                </button>
+              </div>
 
-                    <div className="text-right shrink-0 flex items-center gap-3">
-                      <div>
-                        <span className="text-xs font-bold text-[#FF7A00] font-mono">
-                          R$ {formatCurrency(draft.total)}
-                        </span>
+              <div className="relative flex-1 max-w-xs">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar orçamento..."
+                  value={listSearch}
+                  onChange={(e) => setListSearch(e.target.value)}
+                  className="w-full bg-[#141418] border border-[#28282e] rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
+                />
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-3 flex-1">
+              {filteredQuotesList.length > 0 ? (
+                filteredQuotesList.map(draft => {
+                  const isSent = draft.status === 'enviado' || draft.status === 'pedido' || draft.status === 'concluido';
+                  return (
+                    <div 
+                      key={draft.id} 
+                      className="p-4 bg-[#0e0e11] hover:bg-[#18181f] border border-[#242429] hover:border-[#FF7A00]/40 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-bold text-white truncate">{draft.clientName}</h4>
+                          <span className="text-[10px] font-mono text-zinc-500 bg-[#1c1c24] px-1.5 py-0.5 rounded border border-[#2a2a38]">
+                            #{draft.quoteNumber}
+                          </span>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 ${
+                            draft.status === 'pedido'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : draft.status === 'concluido'
+                              ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                              : isSent 
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {draft.status === 'pedido' ? 'O.S. Aprovada' : draft.status === 'concluido' ? 'Concluído' : isSent ? 'Enviado' : 'Rascunho'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-400 mt-1 truncate">
+                          {draft.items?.length || 0} itens: {draft.items?.map(i => i.description).join(', ') || 'Sem descrição'}
+                        </p>
+                        <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1">
+                          <span>Salvo em {draft.savedAt || draft.date}</span>
+                          {draft.address && <span className="truncate max-w-[200px]">{draft.address}</span>}
+                        </div>
                       </div>
-                      <button
-                        onClick={(e) => handleDeleteDraft(e, draft.id)}
-                        className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-[#25252e] rounded-lg transition-colors"
-                        title="Excluir Rascunho"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#242429]">
+                        <div className="text-left sm:text-right">
+                          <span className="text-xs font-bold text-[#FF7A00] font-mono">
+                            R$ {formatCurrency(draft.total)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreDraft(draft)}
+                            className="bg-[#202028] hover:bg-[#FF7A00] text-zinc-300 hover:text-black px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1"
+                            title="Carregar no formulário"
+                          >
+                            <FileEdit size={12} />
+                            Resgatar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleGeneratePdfFromDraft(e, draft)}
+                            className="bg-[#202028] hover:bg-[#2e2e3a] text-white hover:text-[#FF7A00] p-1.5 rounded-lg text-[10px] font-bold transition-colors border border-[#2e2e3a]"
+                            title="Baixar PDF"
+                          >
+                            <FileDown size={13} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleStatus(e, draft.id, draft.status)}
+                            className={`p-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                              isSent
+                                ? 'text-zinc-400 hover:text-amber-400 hover:bg-[#202028]'
+                                : 'text-zinc-400 hover:text-blue-400 hover:bg-[#202028]'
+                            }`}
+                            title={isSent ? 'Mudar status para Rascunho' : 'Mudar status para Enviado'}
+                          >
+                            {isSent ? <Clock size={13} /> : <Send size={13} />}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteDraft(e, draft)}
+                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-[#25252e] rounded-lg transition-colors active:scale-95"
+                            title="Excluir Orçamento"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
-                <div className="p-8 text-center text-zinc-500 text-xs">
-                  Nenhum rascunho salvo ainda. Preencha os dados e clique em &quot;Salvar Rascunho&quot;.
+                <div className="w-full p-8 text-center text-zinc-400 text-xs bg-[#0e0e11] rounded-xl border border-dashed border-[#24242f] flex flex-col items-center justify-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-[#1c1c24] flex items-center justify-center text-zinc-500 shrink-0">
+                    <History size={16} />
+                  </div>
+                  <p className="w-full text-center text-zinc-300 font-semibold">
+                    Nenhum orçamento salvo ainda.
+                  </p>
                 </div>
               )}
             </div>
@@ -827,6 +1278,407 @@ export default function OrcamentosPage() {
                 className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white bg-[#18181c] rounded-lg transition-colors"
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE PRÉ-VISUALIZAÇÃO COMPLETA (MODO CONFERÊNCIA - NÃO SALVA NADA) */}
+      {isPreviewModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+          <div className="bg-[#121216] border border-[#262630] rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
+            
+            {/* Header da Barra de Pré-Visualização */}
+            <div className="p-4 sm:p-5 border-b border-[#22222a] bg-[#0c0c0f] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#FF7A00]/10 border border-[#FF7A00]/25 flex items-center justify-center text-[#FF7A00] shrink-0">
+                  <Eye size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-sm font-bold text-white">Pré-Visualização do Orçamento</h2>
+                    <span className="text-xs font-mono text-zinc-400 bg-[#181820] px-2 py-0.5 rounded border border-[#2a2a38]">
+                      #{quoteNumber}
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+                      Modo Conferência • Não salva
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">Confira todos os dados e formatações antes de emitir ou enviar ao cliente.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                {/* Seletor de Páginas no Modal */}
+                <div className="flex items-center bg-[#181820] p-1 rounded-xl border border-[#262632] gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModalPage('ambas')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      previewModalPage === 'ambas'
+                        ? 'bg-[#FF7A00] text-black shadow'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {includeWarranty ? 'Ambas as Páginas (2)' : 'Documento (1 Pág)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModalPage('orcamento')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      previewModalPage === 'orcamento'
+                        ? 'bg-[#FF7A00] text-black shadow'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Pág 1: Orçamento
+                  </button>
+                  {includeWarranty && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModalPage('garantia')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                        previewModalPage === 'garantia'
+                          ? 'bg-[#FF7A00] text-black shadow'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Pág 2: Garantia
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setIsPreviewModalOpen(false)}
+                  className="text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-[#1f1f28] transition-colors"
+                  title="Fechar Pré-Visualização"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Conteúdo de Conferência (Scrollável e Formato Folha A4 Real) */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#09090c] space-y-6 flex flex-col items-center">
+              
+              {/* PÁGINA 1: ORÇAMENTO TIMBRADO */}
+              {(previewModalPage === 'ambas' || previewModalPage === 'orcamento') && (
+                <div className="w-full max-w-[760px] bg-white text-gray-900 rounded-xl shadow-2xl border border-gray-300 p-6 sm:p-10 select-none text-[11px] leading-tight">
+                  
+                  {/* Cabeçalho Oficial */}
+                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-4 mb-4">
+                    <div className="flex items-center gap-3.5">
+                      <img 
+                        src="/logo.svg" 
+                        alt="Logo JC Eletricista" 
+                        className="w-14 h-14 rounded-lg object-contain shrink-0 shadow-sm border border-[#26262e] bg-[#0c0c0f]" 
+                      />
+                      <div>
+                        <h1 className="text-base font-black uppercase text-gray-900 tracking-tight leading-none">JC ELETRICISTA</h1>
+                        <p className="text-[10px] text-[#ea580c] font-bold mt-1">Serviços Elétricos Profissionais & Manutenção</p>
+                        <p className="text-[9px] text-gray-500">Residencial • Comercial • Padrão de Entrada • NR-10</p>
+                        <p className="text-[8px] text-gray-400 mt-0.5">WhatsApp: (47) 99706-4183 • Joinville - SC</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block bg-gray-900 text-white font-black text-[10px] px-2.5 py-1 rounded uppercase tracking-wider">
+                        Orçamento
+                      </span>
+                      <p className="text-xs text-gray-800 font-mono font-bold mt-1.5">Nº {quoteNumber}</p>
+                      <p className="text-[9px] text-gray-500 mt-0.5">Emissão: {new Date().toLocaleDateString('pt-BR')}</p>
+                      <p className="text-[8px] text-amber-700 font-bold mt-0.5">Validade: 15 dias corridos</p>
+                    </div>
+                  </div>
+
+                  {/* Informações do Cliente */}
+                  <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                      <div>
+                        <p className="text-[8px] font-bold uppercase text-gray-400">Cliente / Contratante:</p>
+                        <p className="text-xs font-bold text-gray-900 mt-0.5">{selectedClient || 'Nome do Cliente não selecionado'}</p>
+                        {(() => {
+                          const clientData = clients.find(c => c.name === selectedClient);
+                          return (
+                            <>
+                              {clientData?.doc && <p className="text-gray-600">CPF/CNPJ: {clientData.doc}</p>}
+                              {clientData?.phone && <p className="text-gray-600">Telefone: {clientData.phone}</p>}
+                              {clientData?.email && <p className="text-gray-600">E-mail: {clientData.email}</p>}
+                            </>
+                          );
+                        })()}
+                      </div>
+                      <div>
+                        <p className="text-[8px] font-bold uppercase text-gray-400">Local da Obra / Instalação:</p>
+                        <p className="text-gray-800 font-medium mt-0.5">{address || 'Endereço não informado'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tabela de Itens e Serviços */}
+                  <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
+                    <table className="w-full text-[10px] text-left">
+                      <thead className="bg-gray-100 border-b border-gray-300 text-gray-600 uppercase text-[9px] font-bold">
+                        <tr>
+                          <th className="py-2 px-3 w-10 text-center">#</th>
+                          <th className="py-2 px-3">Descrição dos Serviços / Materiais</th>
+                          <th className="py-2 px-3 text-center w-16">Qtd</th>
+                          <th className="py-2 px-3 text-right w-24">Vlr. Unit.</th>
+                          <th className="py-2 px-3 text-right w-28">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {items.length > 0 ? (
+                          items.map((item, idx) => (
+                            <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                              <td className="py-2 px-3 text-center font-mono text-gray-500">{idx + 1}</td>
+                              <td className="py-2 px-3 font-medium text-gray-900">{item.description}</td>
+                              <td className="py-2 px-3 text-center font-mono text-gray-700">{item.quantity}</td>
+                              <td className="py-2 px-3 text-right font-mono text-gray-700">R$ {formatCurrency(item.unitPrice)}</td>
+                              <td className="py-2 px-3 text-right font-mono font-bold text-gray-900">
+                                R$ {formatCurrency(item.quantity * item.unitPrice)}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="py-4 text-center text-gray-400 italic">
+                              Nenhum item adicionado ao orçamento até o momento.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Quadro de Totais */}
+                  <div className="flex justify-end mb-4">
+                    <div className="w-64 bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-1.5 text-[10px]">
+                      <div className="flex justify-between text-gray-600">
+                        <span>Subtotal dos Serviços:</span>
+                        <span className="font-mono">R$ {formatCurrency(subtotal)}</span>
+                      </div>
+                      {discount > 0 && (
+                        <div className="flex justify-between text-red-600 font-semibold">
+                          <span>Desconto Concedido:</span>
+                          <span className="font-mono">- R$ {formatCurrency(discount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center text-xs font-black text-gray-900 border-t border-gray-200 pt-1.5">
+                        <span className="uppercase">Valor Total:</span>
+                        <span className="text-[#ea580c] font-mono text-sm">R$ {formatCurrency(total)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Observações e Condições */}
+                  {observations && (
+                    <div className="bg-amber-50/60 border border-amber-200/80 rounded-lg p-3 text-[9px] text-gray-700 mb-4 leading-relaxed">
+                      <p className="font-bold uppercase text-amber-900 mb-1">Observações & Condições Gerais:</p>
+                      <p className="whitespace-pre-line text-gray-800">{observations}</p>
+                    </div>
+                  )}
+
+                  {/* Assinaturas */}
+                  <div className="pt-4 border-t border-gray-300 flex justify-between text-[8px] text-gray-500 text-center gap-8">
+                    <div className="flex-1 border-t border-gray-400 pt-1">
+                      <p className="font-bold text-gray-800">JC ELETRICISTA</p>
+                      <p className="text-[7px]">Responsável Técnico</p>
+                    </div>
+                    <div className="flex-1 border-t border-gray-400 pt-1">
+                      <p className="font-bold text-gray-800">{selectedClient || 'Cliente'}</p>
+                      <p className="text-[7px]">Aceite e Autorização do Serviço</p>
+                    </div>
+                  </div>
+
+                  <div className="text-center text-[7px] text-gray-400 mt-4">
+                    Página 1 de {includeWarranty ? '2' : '1'} • Orçamento #{quoteNumber}
+                  </div>
+                </div>
+              )}
+
+              {/* PÁGINA 2: TERMO DE GARANTIA (SE ATIVADO) */}
+              {includeWarranty && (previewModalPage === 'ambas' || previewModalPage === 'garantia') && (
+                <div className="w-full max-w-[760px] bg-white text-gray-900 rounded-xl shadow-2xl border border-gray-300 p-6 sm:p-10 select-none text-[11px] leading-tight">
+                  
+                  {/* Cabeçalho da Garantia */}
+                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-4 mb-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-14 h-14 rounded-lg bg-black border border-[#FF7A00]/40 flex flex-col items-center justify-center p-1 shrink-0 shadow-sm text-center">
+                        <span className="font-black italic text-lg leading-none text-[#FF7A00]">JC</span>
+                        <span className="text-[6px] font-black text-white uppercase tracking-wider mt-0.5">ELETRICISTA</span>
+                        <span className="text-[5px] text-[#FF7A00] leading-none">profissional</span>
+                      </div>
+                      <div>
+                        <h1 className="text-base font-black uppercase text-gray-900 tracking-tight leading-none">CERTIFICADO DE GARANTIA</h1>
+                        <p className="text-[10px] text-[#ea580c] font-bold mt-1">Conformidade Técnica ABNT NBR 5410 & NR-10</p>
+                        <p className="text-[9px] text-gray-500">Garantia Técnica sobre a Execução de Serviços Elétricos</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block bg-[#ea580c] text-white font-black text-[10px] px-2.5 py-1 rounded uppercase tracking-wider">
+                        Garantia
+                      </span>
+                      <p className="text-xs text-gray-800 font-mono font-bold mt-1.5">Ref: #{quoteNumber}</p>
+                      <p className="text-[9px] text-gray-500 mt-0.5">Página 2 de 2</p>
+                    </div>
+                  </div>
+
+                  {/* Informações do Contrato de Garantia */}
+                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4 text-[9px]">
+                    <span className="font-bold text-gray-700">Contratante:</span> <span className="text-gray-900 font-bold">{selectedClient || 'Cliente'}</span>
+                    <span className="mx-2 text-gray-300">•</span>
+                    <span className="font-bold text-gray-700">Local da Execução:</span> <span className="text-gray-700">{address || 'Conforme especificado no orçamento'}</span>
+                  </div>
+
+                  {/* Cláusulas Técnicas Detalhadas */}
+                  <div className="space-y-3 text-[9px] text-gray-700 leading-relaxed border border-gray-200 rounded-lg p-4 bg-gray-50/50 mb-4">
+                    <div>
+                      <p className="font-bold text-[#ea580c]">1. PRAZO E COBERTURA LEGAL DA GARANTIA</p>
+                      <p className="text-gray-600 mt-0.5">
+                        A JC ELETRICISTA assegura garantia legal e técnica de 90 (noventa) dias corridos sobre toda a mão de obra especializada executada nesta proposta, em estrito cumprimento ao Artigo 26, inciso II, da Lei Federal nº 8.078/1990 (Código de Defesa do Consumidor).
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-bold text-[#ea580c]">2. NORMAS TÉCNICAS E SEGURANÇA OPERACIONAL</p>
+                      <p className="text-gray-600 mt-0.5">
+                        Os serviços foram planejados e executados em rigorosa consonância com os parâmetros da norma ABNT NBR 5410 (Instalações Elétricas de Baixa Tensão) e diretrizes de segurança da NR-10 do Ministério do Trabalho e Emprego.
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-bold text-[#ea580c]">3. CONDIÇÕES PARA VALIDADE DA GARANTIA</p>
+                      <p className="text-gray-600 mt-0.5">
+                        A cobertura permanece válida mediante uso exclusivo de condutores, disjuntores e dispositivos certificados pelo INMETRO, respeitando integralmente as capacidades de corrente e carga calculadas pelo responsável técnico.
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-bold text-[#ea580c]">4. EXCLUSÕES DE COBERTURA</p>
+                      <p className="text-gray-600 mt-0.5">
+                        A garantia não abrange falhas decorrentes de intervenções de terceiros não autorizados, sobrecargas não dimensionadas posteriormente, sinistros por infiltrações de água ou descargas atmosféricas em circuitos desprovidos de Dispositivos de Proteção contra Surtos (DPS).
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-bold text-[#ea580c]">5. SUPORTE TÉCNICO E ACIONAMENTO PRIORITÁRIO</p>
+                      <p className="text-gray-600 mt-0.5">
+                        Havendo qualquer dúvida operacional ou necessidade de suporte técnico, o cliente dispõe de atendimento prioritário via WhatsApp oficial (47 99706-4183).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Assinaturas do Certificado */}
+                  <div className="pt-4 border-t border-gray-300 flex justify-between text-[8px] text-gray-500 text-center gap-8">
+                    <div className="flex-1 border-t border-gray-400 pt-1">
+                      <p className="font-bold text-gray-800">JC ELETRICISTA</p>
+                      <p className="text-[7px]">Emissor e Responsável Técnico</p>
+                    </div>
+                    <div className="flex-1 border-t border-gray-400 pt-1">
+                      <p className="font-bold text-gray-800">{selectedClient || 'Cliente'}</p>
+                      <p className="text-[7px]">Recebimento do Certificado</p>
+                    </div>
+                  </div>
+
+                  <div className="text-center text-[7px] text-gray-400 mt-4">
+                    Página 2 de 2 • Certificado de Garantia • Orçamento #{quoteNumber}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Barra Inferior de Ações do Modal de Conferência */}
+            <div className="p-4 bg-[#0c0c0f] border-t border-[#22222a] flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Nenhuma alteração foi salva. Você pode voltar e ajustar qualquer item.</span>
+              </div>
+
+              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1a1a22] hover:bg-[#242430] border border-[#2a2a38] rounded-xl transition-all"
+                >
+                  Voltar para Edição
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintScreen}
+                  className="px-3.5 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1a1a22] hover:bg-[#242430] border border-[#2a2a38] rounded-xl transition-all flex items-center gap-1.5"
+                  title="Imprimir visualização"
+                >
+                  <Printer size={14} />
+                  Imprimir
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPreviewModalOpen(false);
+                    handleGeneratePdf();
+                  }}
+                  className="px-4 py-2 text-xs font-black text-black bg-[#FF7A00] hover:bg-[#FF8A00] rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-[#FF7A00]/20 active:scale-[0.98]"
+                >
+                  <FileDown size={14} />
+                  Baixar PDF Oficial
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ORÇAMENTO */}
+      {quoteToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Excluir Orçamento</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Esta ação não poderá ser desfeita.</p>
+              </div>
+            </div>
+
+            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Número:</span>
+                <span className="font-mono font-bold text-white">#{quoteToDelete.quoteNumber}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Cliente:</span>
+                <span className="font-bold text-zinc-200 truncate max-w-[200px]">{quoteToDelete.clientName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Valor Total:</span>
+                <span className="font-mono font-bold text-[#FF7A00]">R$ {formatCurrency(quoteToDelete.total)}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+              <button
+                type="button"
+                onClick={() => setQuoteToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+              >
+                <Trash2 size={13} />
+                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
               </button>
             </div>
           </div>

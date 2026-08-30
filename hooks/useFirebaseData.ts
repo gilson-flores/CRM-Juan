@@ -16,6 +16,7 @@ import {
 } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, getDocs } from 'firebase/firestore';
+import { logger } from '@/lib/logger';
 import type { Client } from '@/app/clientes/page';
 import type { FullDraft } from '@/app/orcamentos/page';
 import type { CatalogItem } from '@/hooks/useGoogleSheets';
@@ -117,7 +118,13 @@ export function useFirebaseData() {
   // Actions
   const updateSettings = useCallback(async (newSettings: CompanySettings) => {
     setCompanySettings(newSettings);
-    return await saveCompanySettings(newSettings);
+    const res = await saveCompanySettings(newSettings);
+    if (res) {
+      logger.info('Configurações', 'Dados da empresa atualizados com sucesso no Firestore');
+    } else {
+      logger.error('Configurações', 'Falha ao gravar dados da empresa no Firestore');
+    }
+    return res;
   }, []);
 
   const saveClient = useCallback(async (client: Client) => {
@@ -126,7 +133,9 @@ export function useFirebaseData() {
     localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updated));
     try {
       await setDoc(doc(db, 'clients', String(client.id)), client, { merge: true });
-    } catch (e) {
+      logger.info('Clientes', `Cliente "${client.name}" salvo no Firestore`);
+    } catch (e: any) {
+      logger.error('Clientes', `Erro ao sincronizar cliente "${client.name}" no Firestore`, e?.message || e);
       console.warn('Could not push client to Firestore immediately:', e);
     }
   }, [clients]);
@@ -137,7 +146,9 @@ export function useFirebaseData() {
     localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updated));
     try {
       await deleteDoc(doc(db, 'clients', String(id)));
-    } catch (e) {
+      logger.info('Clientes', `Cliente ID ${id} removido do Firestore`);
+    } catch (e: any) {
+      logger.error('Clientes', `Erro ao remover cliente ID ${id} no Firestore`, e?.message || e);
       console.warn('Could not delete client from Firestore:', e);
     }
   }, [clients]);
@@ -148,7 +159,9 @@ export function useFirebaseData() {
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
     try {
       await setDoc(doc(db, 'quotes', String(quote.id)), quote, { merge: true });
-    } catch (e) {
+      logger.info('Orçamentos', `Orçamento "${quote.quoteNumber}" de ${quote.clientName} salvo no Firestore`);
+    } catch (e: any) {
+      logger.error('Orçamentos', `Erro ao salvar orçamento "${quote.quoteNumber}" no Firestore`, e?.message || e);
       console.warn('Could not push quote to Firestore immediately:', e);
     }
   }, [quotes]);
@@ -159,7 +172,9 @@ export function useFirebaseData() {
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
     try {
       await deleteDoc(doc(db, 'quotes', String(id)));
-    } catch (e) {
+      logger.info('Orçamentos', `Orçamento ID ${id} removido do Firestore`);
+    } catch (e: any) {
+      logger.error('Orçamentos', `Erro ao remover orçamento ID ${id} no Firestore`, e?.message || e);
       console.warn('Could not delete quote from Firestore:', e);
     }
   }, [quotes]);

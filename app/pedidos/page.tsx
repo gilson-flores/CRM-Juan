@@ -1,21 +1,35 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { CheckCircle, Clock, ArrowRight, Search, FileText, CheckSquare, Trash2, Calendar, TrendingUp } from 'lucide-react';
+import { CheckCircle, Clock, ArrowRight, Search, FileText, CheckSquare, Trash2, Calendar, TrendingUp, FileDown, Printer, AlertTriangle } from 'lucide-react';
 import type { FullDraft } from '../orcamentos/page';
+import type { Client } from '../clientes/page';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
+import { generateQuotePdf } from '@/lib/generatePdf';
+import { db } from '@/lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { logger } from '@/lib/logger';
 
 export default function PedidosPage() {
   const [quotes, setQuotes] = useState<FullDraft[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
-  const { syncAllData } = useGoogleSheets();
+  const [orderToDelete, setOrderToDelete] = useState<FullDraft | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { syncAllData, isConnected } = useGoogleSheets();
 
   useEffect(() => {
     const timer = setTimeout(() => {
       const saved = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
+      const savedClients = localStorage.getItem('@jc-eletricista:clients');
       if (saved) {
         try {
           setQuotes(JSON.parse(saved));
+        } catch (e) {}
+      }
+      if (savedClients) {
+        try {
+          setClients(JSON.parse(savedClients));
         } catch (e) {}
       }
     }, 0);
@@ -35,17 +49,52 @@ export default function PedidosPage() {
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
     setSelectedQuoteId('');
-    showNotification('Orçamento transformado em pedido com sucesso!');
+    showNotification('Orçamento transformado em Ordem de Serviço com sucesso!');
     syncAllData().catch(e => console.error('Sync failed', e));
+    if (typeof window !== 'undefined') {
+      const scrollContainer = document.getElementById('main-content-scroll');
+      if (scrollContainer) {
+        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
   };
 
-  const handleDeleteOrder = (id: string) => {
-    if (confirm('Deseja excluir este pedido? Ele será removido permanentemente.')) {
-      const updatedQuotes = quotes.filter(q => q.id !== id);
+  const handleDeleteOrder = (order: FullDraft) => {
+    setOrderToDelete(order);
+  };
+
+  const handleConfirmDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    const target = orderToDelete;
+    setIsDeleting(true);
+
+    try {
+      // 1. Atualizar estado local
+      const updatedQuotes = quotes.filter(q => q.id !== target.id);
       setQuotes(updatedQuotes);
       localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
-      showNotification('Pedido excluído.', 'info');
-      syncAllData().catch(e => console.error('Sync failed', e));
+
+      // 2. Apagar no Firestore
+      try {
+        await deleteDoc(doc(db, 'quotes', String(target.id)));
+        logger.info('Pedidos', `O.S. #${target.quoteNumber} removida do Firestore`);
+      } catch (err) {
+        console.warn('Erro ao deletar O.S. no Firestore:', err);
+      }
+
+      // 3. Sincronizar com Google Sheets
+      if (isConnected) {
+        syncAllData().catch(e => console.error('Sync failed', e));
+      }
+
+      showNotification(`Ordem de Serviço #${target.quoteNumber} excluída.`, 'info');
+    } catch (e: any) {
+      showNotification('Erro ao excluir Ordem de Serviço.', 'error');
+    } finally {
+      setIsDeleting(false);
+      setOrderToDelete(null);
     }
   };
 
@@ -55,8 +104,16 @@ export default function PedidosPage() {
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
-    showNotification('Serviço marcado como concluído!', 'success');
+    showNotification('Ordem de Serviço marcada como concluída!', 'success');
     syncAllData().catch(e => console.error('Sync failed', e));
+    if (typeof window !== 'undefined') {
+      const scrollContainer = document.getElementById('main-content-scroll');
+      if (scrollContainer) {
+        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
   };
 
   const handleRevertToOrder = (id: string) => {
@@ -65,8 +122,40 @@ export default function PedidosPage() {
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
-    showNotification('Status revertido para Em Andamento', 'info');
+    showNotification('Status revertido para O.S. Em Andamento', 'info');
     syncAllData().catch(e => console.error('Sync failed', e));
+  };
+
+  // Gerar PDF da Ordem de Serviço com Termo de Garantia OBRIGATÓRIO (2 páginas)
+  const handleGenerateOrderPdf = async (order: FullDraft) => {
+    try {
+      const clientData = clients.find(c => c.name === order.clientName);
+      const localSettings = localStorage.getItem('@jc-eletricista:company_settings');
+      const companySettings = localSettings ? JSON.parse(localSettings) : undefined;
+      const subtotal = order.items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+
+      await generateQuotePdf({
+        quoteNumber: order.quoteNumber,
+        date: order.date || new Date().toLocaleDateString('pt-BR'),
+        clientName: order.clientName || 'Cliente',
+        clientDoc: clientData?.doc,
+        clientPhone: clientData?.phone,
+        clientEmail: clientData?.email,
+        address: order.address || clientData?.address || '',
+        items: order.items,
+        subtotal: subtotal,
+        discount: order.discount || 0,
+        total: order.total,
+        observations: order.observations,
+        companySettings,
+        includeWarranty: true, // OBRIGATÓRIO na Ordem de Serviço
+        documentType: 'ordem_servico'
+      });
+
+      showNotification('PDF da Ordem de Serviço gerado com sucesso (com Termo de Garantia obrigatório)!', 'success');
+    } catch (err: any) {
+      showNotification('Erro ao gerar PDF da Ordem de Serviço.', 'error');
+    }
   };
 
   const availableQuotes = quotes.filter(q => q.status === 'enviado' || !q.status || q.status === 'rascunho');
@@ -98,8 +187,8 @@ export default function PedidosPage() {
 
       <header className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Gestão de Pedidos</h1>
-          <p className="text-xs text-zinc-400 mt-1">Transforme orçamentos aprovados em serviços ativos e gerencie as entregas.</p>
+          <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Gestão de Ordens de Serviço</h1>
+          <p className="text-xs text-zinc-400 mt-1">Transforme orçamentos aprovados em Ordens de Serviço oficiais com Termo de Garantia obrigatório.</p>
         </div>
       </header>
 
@@ -107,7 +196,7 @@ export default function PedidosPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-[#0e0e11] border border-[#222226] rounded-xl p-5 flex items-center justify-between shadow-lg shadow-black/40">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1.5"><Clock size={12}/> Em Andamento</span>
+            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest flex items-center gap-1.5"><Clock size={12}/> O.S. Em Andamento</span>
             <span className="text-2xl font-black text-white">{stats.countActive}</span>
           </div>
           <div className="text-right flex flex-col gap-1">
@@ -117,7 +206,7 @@ export default function PedidosPage() {
         </div>
         <div className="bg-[#0e0e11] border border-[#222226] rounded-xl p-5 flex items-center justify-between shadow-lg shadow-black/40">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1.5"><CheckCircle size={12}/> Concluídos</span>
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1.5"><CheckCircle size={12}/> O.S. Concluídas</span>
             <span className="text-2xl font-black text-white">{stats.countCompleted}</span>
           </div>
           <div className="text-right flex flex-col gap-1">
@@ -132,7 +221,7 @@ export default function PedidosPage() {
         <section className="lg:col-span-1 bg-[#0e0e11] rounded-xl border border-[#222226] p-5 shadow-lg shadow-black/40">
           <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
             <CheckSquare className="text-[#FF7A00]" size={18} />
-            Aprovar Orçamento
+            Gerar Ordem de Serviço
           </h2>
           <div className="flex flex-col gap-3">
             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Selecione o Orçamento Pendente</label>
@@ -154,7 +243,7 @@ export default function PedidosPage() {
               disabled={!selectedQuoteId}
               className="mt-2 w-full flex items-center justify-center gap-2 bg-[#FF7A00] hover:bg-[#FF8A00] disabled:bg-[#18181b] disabled:text-zinc-600 disabled:cursor-not-allowed text-black font-black uppercase tracking-wider text-xs px-4 py-3.5 rounded-xl transition-all shadow-lg shadow-[#FF7A00]/10"
             >
-              Iniciar Serviço <ArrowRight size={16} />
+              Iniciar Ordem de Serviço <ArrowRight size={16} />
             </button>
           </div>
         </section>
@@ -166,7 +255,7 @@ export default function PedidosPage() {
           <div className="bg-[#0e0e11] rounded-xl border border-[#222226] p-5 shadow-lg shadow-black/40">
             <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
               <TrendingUp className="text-blue-400" size={18} />
-              Serviços em Andamento
+              Ordens de Serviço em Andamento
             </h2>
             
             <div className="space-y-3">
@@ -176,7 +265,7 @@ export default function PedidosPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="text-sm font-bold text-white">{order.clientName}</h3>
-                        <span className="bg-[#1f1f28] text-zinc-400 text-[10px] px-2 py-0.5 rounded font-mono">#{order.quoteNumber}</span>
+                        <span className="bg-[#1f1f28] text-zinc-400 text-[10px] px-2 py-0.5 rounded font-mono">O.S. #{order.quoteNumber}</span>
                       </div>
                       <div className="flex items-center gap-3 text-[11px] text-zinc-400 mt-2">
                         <span className="flex items-center gap-1"><Calendar size={12} /> {order.date}</span>
@@ -188,6 +277,13 @@ export default function PedidosPage() {
                         R$ {formatCurrency(order.total)}
                       </span>
                       <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleGenerateOrderPdf(order)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-white bg-[#262630] hover:bg-[#323240] px-3 py-1.5 rounded-lg transition-colors border border-[#3f3f4e]"
+                          title="Baixar Ordem de Serviço oficial em PDF (com Termo de Garantia)"
+                        >
+                          <FileDown size={12} className="text-[#FF7A00]" /> PDF O.S.
+                        </button>
                         <button 
                           onClick={() => handleMarkAsCompleted(order.id)}
                           className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-400/10 hover:bg-emerald-400/20 px-3 py-1.5 rounded-lg transition-colors"
@@ -195,9 +291,9 @@ export default function PedidosPage() {
                           <CheckCircle size={12} /> Concluir
                         </button>
                         <button 
-                          onClick={() => handleDeleteOrder(order.id)}
-                          className="text-zinc-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-[#27272a] transition-colors"
-                          title="Excluir"
+                          onClick={() => handleDeleteOrder(order)}
+                          className="text-zinc-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-[#27272a] transition-colors active:scale-95"
+                          title="Excluir O.S."
                         >
                           <Trash2 size={14} />
                         </button>
@@ -207,7 +303,7 @@ export default function PedidosPage() {
                 ))
               ) : (
                 <div className="text-center p-8 text-zinc-500 text-xs bg-[#141418] rounded-xl border border-dashed border-[#27272a]">
-                  Nenhum serviço em andamento no momento.
+                  Nenhuma ordem de serviço em andamento no momento.
                 </div>
               )}
             </div>
@@ -218,7 +314,7 @@ export default function PedidosPage() {
             <div className="bg-[#0e0e11] rounded-xl border border-[#222226] p-5 shadow-lg shadow-black/40">
               <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2 opacity-70">
                 <CheckCircle className="text-emerald-400" size={18} />
-                Serviços Concluídos
+                Ordens de Serviço Concluídas
               </h2>
               
               <div className="space-y-3">
@@ -227,7 +323,7 @@ export default function PedidosPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="text-sm font-bold text-white">{order.clientName}</h3>
-                        <span className="bg-[#1f1f28] text-zinc-500 text-[10px] px-2 py-0.5 rounded font-mono">#{order.quoteNumber}</span>
+                        <span className="bg-[#1f1f28] text-zinc-500 text-[10px] px-2 py-0.5 rounded font-mono">O.S. #{order.quoteNumber}</span>
                         <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded font-bold uppercase">Concluído</span>
                       </div>
                       <div className="flex items-center gap-3 text-[11px] text-zinc-500 mt-2">
@@ -239,6 +335,13 @@ export default function PedidosPage() {
                         R$ {formatCurrency(order.total)}
                       </span>
                       <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleGenerateOrderPdf(order)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-white bg-[#1c1c22] hover:bg-[#282830] px-3 py-1.5 rounded-lg transition-colors border border-[#353540]"
+                          title="Baixar Ordem de Serviço oficial em PDF (com Termo de Garantia)"
+                        >
+                          <FileDown size={12} className="text-[#FF7A00]" /> PDF O.S.
+                        </button>
                         <button 
                           onClick={() => handleRevertToOrder(order.id)}
                           className="text-[10px] font-bold text-zinc-400 hover:text-blue-400 bg-[#18181b] hover:bg-[#27272a] px-3 py-1.5 rounded-lg transition-colors"
@@ -246,9 +349,9 @@ export default function PedidosPage() {
                           Reverter para Andamento
                         </button>
                         <button 
-                          onClick={() => handleDeleteOrder(order.id)}
-                          className="text-zinc-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-[#27272a] transition-colors"
-                          title="Excluir"
+                          onClick={() => handleDeleteOrder(order)}
+                          className="text-zinc-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-[#27272a] transition-colors active:scale-95"
+                          title="Excluir O.S."
                         >
                           <Trash2 size={14} />
                         </button>
@@ -262,6 +365,58 @@ export default function PedidosPage() {
 
         </section>
       </div>
+
+      {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ORDEM DE SERVIÇO */}
+      {orderToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Excluir Ordem de Serviço</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Esta ação removerá a O.S. permanentemente.</p>
+              </div>
+            </div>
+
+            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Número da O.S.:</span>
+                <span className="font-mono font-bold text-white">#{orderToDelete.quoteNumber}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Cliente:</span>
+                <span className="font-bold text-zinc-200 truncate max-w-[200px]">{orderToDelete.clientName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Valor Total:</span>
+                <span className="font-mono font-bold text-[#FF7A00]">R$ {formatCurrency(orderToDelete.total)}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+              <button
+                type="button"
+                onClick={() => setOrderToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteOrder}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+              >
+                <Trash2 size={13} />
+                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

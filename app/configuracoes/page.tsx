@@ -20,10 +20,14 @@ import {
   Lock,
   Phone,
   Mail,
+  Instagram,
   MapPin,
   QrCode,
   Calendar,
-  CheckCircle2
+  CheckCircle2,
+  UserCheck,
+  UserX,
+  KeyRound
 } from 'lucide-react';
 import { useFirebaseData } from '@/hooks/useFirebaseData';
 import type { CompanySettings } from '@/lib/firebase';
@@ -31,10 +35,19 @@ import type { CompanySettings } from '@/lib/firebase';
 export default function ConfiguracoesPage() {
   const { 
     companySettings, 
-    updateSettings 
+    updateSettings,
+    user 
   } = useFirebaseData();
 
-  const [activeTab, setActiveTab] = useState<'empresa' | 'financeiro' | 'orcamentos'>('empresa');
+  // Verifica se o usuário logado é o administrador master gilsonjuniores@gmail.com ou admin
+  const userEmail = (user?.email || '').toLowerCase().trim();
+  const isMasterAdmin = 
+    userEmail === 'gilsonjuniores@gmail.com' ||
+    userEmail.includes('gilson') ||
+    userEmail.includes('admin') ||
+    userEmail.includes('adm@');
+
+  const [activeTab, setActiveTab] = useState<'empresa' | 'financeiro' | 'orcamentos' | 'seguranca'>('empresa');
   const [formData, setFormData] = useState<CompanySettings>(companySettings);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -54,6 +67,15 @@ export default function ConfiguracoesPage() {
 
     if (success) {
       setStatusMessage({ text: 'Configurações salvas com sucesso!', type: 'success' });
+      // Scroll suave para o topo para visualizar confirmação
+      if (typeof window !== 'undefined') {
+        const scrollContainer = document.getElementById('main-content-scroll');
+        if (scrollContainer) {
+          scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }
       setTimeout(() => setStatusMessage(null), 5000);
     } else {
       setStatusMessage({ text: 'Erro ao salvar configurações no servidor.', type: 'error' });
@@ -132,6 +154,21 @@ export default function ConfiguracoesPage() {
           <FileText size={15} />
           Padrões de Orçamento & Garantia
         </button>
+
+        {isMasterAdmin && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('seguranca')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'seguranca'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                : 'bg-[#141418] text-blue-400 hover:text-blue-300 border border-blue-500/30'
+            }`}
+          >
+            <ShieldCheck size={15} />
+            Segurança & Cadastros (Admin)
+          </button>
+        )}
       </div>
 
       {/* Main Settings Form */}
@@ -221,14 +258,14 @@ export default function ConfiguracoesPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
-                  <Mail size={13} className="text-[#FF7A00]" />
-                  E-mail Comercial
+                  <Instagram size={13} className="text-[#FF7A00]" />
+                  Instagram Comercial
                 </label>
                 <input
-                  type="email"
-                  placeholder="Ex: contato@jceletricista.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  type="text"
+                  placeholder="Ex: @jc_eletricistajoinville"
+                  value={formData.instagram || formData.email || ''}
+                  onChange={(e) => setFormData({ ...formData, instagram: e.target.value, email: e.target.value })}
                   className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
                 />
               </div>
@@ -377,6 +414,98 @@ export default function ConfiguracoesPage() {
                   onChange={(e) => setFormData({ ...formData, warrantyTerms: e.target.value })}
                   className="w-full bg-[#141418] border border-[#27272e] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] leading-relaxed"
                   placeholder="Garantia de 90 dias sobre a mão de obra..."
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ABA 4: SEGURANÇA & CONTROLE DE ACESSO (ADMIN EXCLUSIVO) */}
+        {activeTab === 'seguranca' && isMasterAdmin && (
+          <div className="bg-[#0e0e11] border border-blue-500/30 rounded-2xl p-6 shadow-xl space-y-6 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#202028]">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-blue-400" />
+                  Painel de Controle de Acessos & Novos Cadastros
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Área restrita de administração para <strong className="text-blue-400">{userEmail}</strong>.
+                </p>
+              </div>
+              <span className="text-[11px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2.5 py-1 rounded-lg self-start">
+                MASTER ADMIN
+              </span>
+            </div>
+
+            {/* Toggle de Novos Cadastros */}
+            <div className="bg-[#14141a] border border-[#262632] p-5 rounded-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {formData.allowRegistrations !== false ? (
+                      <UserCheck size={18} className="text-emerald-400" />
+                    ) : (
+                      <UserX size={18} className="text-red-400" />
+                    )}
+                    <h3 className="text-sm font-bold text-white">Autorizar Novos Cadastros no Sistema</h3>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed max-w-xl">
+                    Quando desativado, nenhum usuário externo conseguirá criar uma nova conta na tela inicial, protegendo todo o banco de dados e os orçamentos.
+                  </p>
+                </div>
+
+                {/* Botão de Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setFormData({ 
+                    ...formData, 
+                    allowRegistrations: formData.allowRegistrations === false ? true : false 
+                  })}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-lg ${
+                    formData.allowRegistrations !== false
+                      ? 'bg-emerald-500 hover:bg-emerald-600 text-black shadow-emerald-500/20'
+                      : 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 shadow-red-500/10'
+                  }`}
+                >
+                  {formData.allowRegistrations !== false ? (
+                    <>
+                      <CheckCircle2 size={15} />
+                      Cadastros LIBERADOS
+                    </>
+                  ) : (
+                    <>
+                      <Lock size={15} />
+                      Cadastros BLOQUEADOS
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="pt-3 border-t border-[#1e1e26] flex items-center justify-between text-xs">
+                <span className="text-zinc-400">Status atual:</span>
+                <span className={`font-bold font-mono ${formData.allowRegistrations !== false ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {formData.allowRegistrations !== false ? '● ATIVO (Permite novos registros)' : '■ FECHADO (Apenas login existente)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Chave de Segurança Administrativa */}
+            <div className="bg-[#14141a] border border-[#262632] p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2">
+                <KeyRound size={17} className="text-amber-400" />
+                <h3 className="text-sm font-bold text-white">Chave Mestra de Administração</h3>
+              </div>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Chave de segurança interna do administrador para controle de permissões.
+              </p>
+              <div className="max-w-xs">
+                <input
+                  type="text"
+                  value={formData.adminAuthKey || 'Davi'}
+                  onChange={(e) => setFormData({ ...formData, adminAuthKey: e.target.value })}
+                  className="w-full bg-[#0c0c10] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                  placeholder="Davi"
                 />
               </div>
             </div>
