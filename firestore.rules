@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Allow user settings read/write by owner or fallback for initial setup
+    match /company_settings/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Clientes
+    match /clients/{clientId} {
+      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+    }
+
+    // Orçamentos e Pedidos
+    match /quotes/{quoteId} {
+      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+    }
+
+    // Itens de Catálogo
+    match /catalog/{itemId} {
+      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+    }
+
+    // Catch-all rule for general app sync
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

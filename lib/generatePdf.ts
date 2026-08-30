@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import type { CompanySettings } from './firebase';
 
 export type PdfQuoteData = {
   quoteNumber: string;
@@ -19,6 +20,7 @@ export type PdfQuoteData = {
   discount: number;
   total: number;
   observations?: string;
+  companySettings?: Partial<CompanySettings>;
 };
 
 const getLogoBase64 = (): Promise<string> => {
@@ -69,16 +71,18 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
   doc.setFillColor(...primaryOrange);
   doc.rect(0, 42, 210, 2, 'F');
 
+  const company = data.companySettings || {};
+  const compName = company.companyName || 'JC ELETRICISTA';
+  const ownerName = company.ownerName || 'Juan Carlos';
+
   if (logoBase64) {
-    // Add logo to top left. Original aspect is 1:1 since canvas is 500x500
-    // We'll make it 34x34 mm
     doc.addImage(logoBase64, 'JPEG', 14, 4, 34, 34);
   } else {
     // Fallback if logo fails to load
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text('JC ELETRICISTA', 14, 24);
+    doc.setFontSize(18);
+    doc.text(compName.toUpperCase(), 14, 24);
   }
 
   // Quote Meta Info (Right side of header)
@@ -233,11 +237,8 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
   const saldo = data.total * 0.7;
   const formatCurrency = (val: number) => `R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const obsContent = `• Orçamento válido por 15 dias corridos.
-• Garantia de 90 dias sobre os serviço contratados.
-• Materiais por conta do contratante. (salvo acordo prévio).
-• Parcelamento padrão 30% da mão de obra de entrada [${formatCurrency(entrada)}].
-• Saldo ao final dos trabalhos [${formatCurrency(saldo)}].`;
+  const pixLine = company.pixKey ? `\n• Chave PIX (${company.pixType || 'Chave'}): ${company.pixKey} [${company.pixHolder || ownerName}]` : '';
+  const obsContent = (data.observations || company.defaultObservations || `• Orçamento válido por ${company.defaultValidityDays || 15} dias corridos.\n• Garantia de 90 dias sobre a mão de obra.\n• Entrada de 30% [${formatCurrency(entrada)}] e saldo na conclusão [${formatCurrency(saldo)}].`) + pixLine;
 
   const splitObs = doc.splitTextToSize(obsContent, obsWidth - 8);
   doc.text(splitObs, 18, totalsY + 12);
@@ -255,16 +256,19 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
   
   doc.setFontSize(8);
   doc.setTextColor(...grayText);
-  doc.text('JC Eletricista', 55, sigY + 5, { align: 'center' });
+  doc.text(ownerName || compName, 55, sigY + 5, { align: 'center' });
   doc.text('Assinatura do Cliente / Aceite', 155, sigY + 5, { align: 'center' });
 
   // Footer note
   doc.setFontSize(7);
   doc.setTextColor(140, 140, 150);
-  doc.text('JC ELETRICISTA • SERVIÇOS ELÉTRICOS RESIDENCIAIS E COMERCIAIS', 105, 284, { align: 'center' });
-  doc.text('Instalações • Manutenções • Quadros • Padrão de Entrada • Laudos', 105, 288, { align: 'center' });
+  const footerContact = [company.phone, company.email, company.address].filter(Boolean).join(' • ');
+  doc.text(`${compName.toUpperCase()} • ${company.slogan || 'SERVIÇOS ELÉTRICOS'}`, 105, 284, { align: 'center' });
+  if (footerContact) {
+    doc.text(footerContact, 105, 288, { align: 'center' });
+  }
   doc.setTextColor(170, 170, 180);
-  doc.text('Documento gerado pelo sistema JC Eletricista CRM', 105, 292, { align: 'center' });
+  doc.text(`Documento gerado pelo sistema ${compName} CRM`, 105, 292, { align: 'center' });
 
   // Generate File & Trigger Safe Download across iOS & Android
   const fileName = `Orcamento_${(data.clientName || 'Cliente').replace(/[^a-zA-Z0-9]/g, '_')}_${data.quoteNumber || Date.now()}.pdf`;

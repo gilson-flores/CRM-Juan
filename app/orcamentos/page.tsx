@@ -245,6 +245,8 @@ export default function OrcamentosPage() {
     }
 
     const clientData = clients.find(c => c.name === selectedClient);
+    const localSettings = localStorage.getItem('@jc-eletricista:company_settings');
+    const companySettings = localSettings ? JSON.parse(localSettings) : undefined;
 
     await generateQuotePdf({
       quoteNumber,
@@ -258,7 +260,8 @@ export default function OrcamentosPage() {
       subtotal,
       discount,
       total,
-      observations
+      observations,
+      companySettings
     });
 
     // Update status to enviado

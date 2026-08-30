@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "User": {
+      "collection": "users",
+      "fields": {
+        "id": { "type": "string", "description": "ID do usuário" },
+        "email": { "type": "string", "description": "Email" },
+        "displayName": { "type": "string", "description": "Nome de exibição" },
+        "createdAt": { "type": "string", "description": "Data de criação" }
+      }
+    },
+    "CompanySettings": {
+      "collection": "company_settings",
+      "fields": {
+        "companyName": { "type": "string", "description": "Nome da empresa" },
+        "ownerName": { "type": "string", "description": "Nome do responsável" },
+        "doc": { "type": "string", "description": "CNPJ ou CPF" },
+        "phone": { "type": "string", "description": "Telefone / WhatsApp" },
+        "email": { "type": "string", "description": "E-mail de contato" },
+        "address": { "type": "string", "description": "Endereço comercial" },
+        "pixKey": { "type": "string", "description": "Chave PIX" },
+        "pixType": { "type": "string", "description": "Tipo de chave PIX (CNPJ, CPF, Telefone, Email, Aleatória)" },
+        "pixHolder": { "type": "string", "description": "Titular do PIX" },
+        "defaultValidityDays": { "type": "number", "description": "Validade padrão do orçamento em dias" },
+        "defaultObservations": { "type": "string", "description": "Termos de garantia e condições de pagamento padrão" }
+      }
+    },
+    "Client": {
+      "collection": "clients",
+      "fields": {
+        "id": { "type": "string", "description": "ID do cliente" },
+        "type": { "type": "string", "description": "pf ou pj" },
+        "name": { "type": "string", "description": "Nome ou razão social" },
+        "doc": { "type": "string", "description": "CPF ou CNPJ" },
+        "phone": { "type": "string", "description": "Telefone WhatsApp" },
+        "email": { "type": "string", "description": "E-mail" },
+        "cep": { "type": "string", "description": "CEP" },
+        "address": { "type": "string", "description": "Endereço" },
+        "number": { "type": "string", "description": "Número" },
+        "complement": { "type": "string", "description": "Complemento" },
+        "createdAt": { "type": "string", "description": "Data de cadastro" }
+      }
+    },
+    "Quote": {
+      "collection": "quotes",
+      "fields": {
+        "id": { "type": "string", "description": "ID do orçamento" },
+        "quoteNumber": { "type": "string", "description": "Número do orçamento" },
+        "clientName": { "type": "string", "description": "Nome do cliente" },
+        "address": { "type": "string", "description": "Endereço da obra" },
+        "items": { "type": "array", "description": "Lista de itens/serviços" },
+        "discount": { "type": "number", "description": "Desconto" },
+        "subtotal": { "type": "number", "description": "Subtotal" },
+        "total": { "type": "number", "description": "Total final" },
+        "observations": { "type": "string", "description": "Observações e garantias" },
+        "date": { "type": "string", "description": "Data formatada" },
+        "savedAt": { "type": "string", "description": "Timestamp de salvamento" },
+        "status": { "type": "string", "description": "rascunho, enviado, pedido, concluido" }
+      }
+    },
+    "CatalogItem": {
+      "collection": "catalog",
+      "fields": {
+        "id": { "type": "string", "description": "Código do item" },
+        "name": { "type": "string", "description": "Nome do serviço ou material" },
+        "category": { "type": "string", "description": "Categoria" },
+        "unitPrice": { "type": "number", "description": "Preço unitário padrão" },
+        "unit": { "type": "string", "description": "Unidade (un, m, ponto, serviço)" },
+        "description": { "type": "string", "description": "Descrição detalhada" },
+        "createdAt": { "type": "string", "description": "Data de cadastro" }
+      }
+    }
+  }
+}

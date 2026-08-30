@@ -1,6 +1,6 @@
 {
   "name": "JC Eletricista CRM",
-  "description": "Sistema de gestão e orçamentos para serviços elétricos com sincronização Google Sheets e Drive.",
+  "description": "Sistema de gestão e orçamentos para serviços elétricos com autenticação e banco de dados Firebase Firestore em tempo real.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
