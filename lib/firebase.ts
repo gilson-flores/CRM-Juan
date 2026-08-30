@@ -12,7 +12,15 @@ import {
   query,
   orderBy
 } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAt97Yjy9jdI5Sprx7XGUvpcV0qafgkHH4",
+  authDomain: "crm-juan-7c618.firebaseapp.com",
+  projectId: "crm-juan-7c618",
+  storageBucket: "crm-juan-7c618.firebasestorage.app",
+  messagingSenderId: "409673429310",
+  appId: "1:409673429310:web:35f2a5dbfd41117ca6bc6f"
+};
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -20,9 +28,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 // Use named database if specified in config, otherwise fallback to default
-export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+export const db = getFirestore(app);
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({

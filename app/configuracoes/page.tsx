@@ -50,6 +50,7 @@ export default function ConfiguracoesPage() {
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormData(companySettings);
   }, [companySettings]);
 

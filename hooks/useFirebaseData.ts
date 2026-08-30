@@ -42,6 +42,7 @@ export function useFirebaseData() {
   useEffect(() => {
     try {
       const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (savedSettings) setCompanySettings(JSON.parse(savedSettings));
 
       const savedClients = localStorage.getItem('@jc-eletricista:clients');
