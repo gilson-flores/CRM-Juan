@@ -22,46 +22,95 @@ import type { FullDraft } from '@/app/orcamentos/page';
 import type { CatalogItem } from '@/hooks/useGoogleSheets';
 
 export function useFirebaseData() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('@jc-eletricista:local_user');
+        if (cached) return JSON.parse(cached);
+      } catch (e) {
+        console.warn('Error reading initial local user session:', e);
+      }
+    }
+    return null;
+  });
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [companySettings, setCompanySettings] = useState<CompanySettings>(DEFAULT_COMPANY_SETTINGS);
+  const [companySettings, setCompanySettings] = useState<CompanySettings>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
+        if (savedSettings) return JSON.parse(savedSettings);
+      } catch (e) {
+        console.warn('Error reading initial company settings:', e);
+      }
+    }
+    return DEFAULT_COMPANY_SETTINGS;
+  });
   
   // Local state mirrored with cloud
-  const [clients, setClients] = useState<Client[]>([]);
-  const [quotes, setQuotes] = useState<FullDraft[]>([]);
-  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [clients, setClients] = useState<Client[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedClients = localStorage.getItem('@jc-eletricista:clients');
+        if (savedClients) return JSON.parse(savedClients);
+      } catch {}
+    }
+    return [];
+  });
+  const [quotes, setQuotes] = useState<FullDraft[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedQuotes = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
+        if (savedQuotes) return JSON.parse(savedQuotes);
+      } catch {}
+    }
+    return [];
+  });
+  const [catalog, setCatalog] = useState<CatalogItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
+        if (savedCatalog) return JSON.parse(savedCatalog);
+      } catch {}
+    }
+    return [];
+  });
 
   // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        // Fallback to local user if active
+        try {
+          const cached = localStorage.getItem('@jc-eletricista:local_user');
+          if (cached) {
+            setUser(JSON.parse(cached));
+          } else {
+            setUser(null);
+          }
+        } catch {
+          setUser(null);
+        }
+      }
       setAuthLoading(false);
     });
-    return () => unsubscribe();
+
+    const handleCustomAuth = (e: any) => {
+      setUser(e.detail);
+      setAuthLoading(false);
+    };
+
+    window.addEventListener('auth-state-changed', handleCustomAuth);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('auth-state-changed', handleCustomAuth);
+    };
   }, []);
 
-  // 2. Initial load from localStorage
-  useEffect(() => {
-    try {
-      const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (savedSettings) setCompanySettings(JSON.parse(savedSettings));
-
-      const savedClients = localStorage.getItem('@jc-eletricista:clients');
-      if (savedClients) setClients(JSON.parse(savedClients));
-
-      const savedQuotes = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
-      if (savedQuotes) setQuotes(JSON.parse(savedQuotes));
-
-      const savedCatalog = localStorage.getItem('@jc-eletricista:catalog_items');
-      if (savedCatalog) setCatalog(JSON.parse(savedCatalog));
-    } catch (e) {
-      console.warn('Error reading from localStorage:', e);
-    }
-  }, []);
-
-  // 3. Firestore Realtime Listeners
+  // 2. Firestore Realtime Listeners
   useEffect(() => {
     // Company settings
     getCompanySettings().then(setCompanySettings).catch(console.warn);

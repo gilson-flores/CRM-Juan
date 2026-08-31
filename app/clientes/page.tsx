@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 import { db } from '@/lib/firebase';
-import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, deleteDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
+import { Portal } from '@/components/ui/Portal';
 
 export type Client = {
   id: string;
@@ -69,7 +70,6 @@ export default function ClientesPage() {
     }
 
     // Sincronização em tempo real do Firestore
-    const { onSnapshot, collection, setDoc, doc } = require('firebase/firestore');
     const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot: any) => {
       const list: Client[] = [];
       snapshot.forEach((docSnap: any) => {
@@ -510,6 +510,7 @@ export default function ClientesPage() {
         </div>
       )}
 
+      <Portal>
       {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE CLIENTE */}
       {clientToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -577,6 +578,7 @@ export default function ClientesPage() {
           </button>
         </div>
       )}
+      </Portal>
     </>
   );
 }

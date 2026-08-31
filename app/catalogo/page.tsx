@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { useGoogleSheets, CatalogItem, APPS_SCRIPT_TEMPLATE } from '@/hooks/useGoogleSheets';
 import { db } from '@/lib/firebase';
-import { doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { Portal } from '@/components/ui/Portal';
+import { collection, doc, deleteDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 
 export default function CatalogoPage() {
@@ -98,14 +99,15 @@ export default function CatalogoPage() {
           setCatalogItems(JSON.parse(saved));
         }, 0);
       } catch {
-        setCatalogItems([]);
+        timer = setTimeout(() => {
+          setCatalogItems([]);
+        }, 0);
       }
     } else {
       localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
     }
 
     // Sincronização em tempo real do Firestore
-    const { onSnapshot, collection, setDoc, doc } = require('firebase/firestore');
     const unsubCatalog = onSnapshot(collection(db, 'catalog'), (snapshot: any) => {
       const list: CatalogItem[] = [];
       snapshot.forEach((docSnap: any) => {
@@ -409,6 +411,7 @@ export default function CatalogoPage() {
           </div>
         </div>
 
+      <Portal>
       {/* MODAL: CADASTRAR / EDITAR ITEM */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -625,6 +628,7 @@ export default function CatalogoPage() {
           </button>
         </div>
       )}
+      </Portal>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { generateQuotePdf } from '@/lib/generatePdf';
 import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
+import { Portal } from '@/components/ui/Portal';
 
 export default function PedidosPage() {
   const [quotes, setQuotes] = useState<FullDraft[]>([]);
@@ -207,6 +208,7 @@ export default function PedidosPage() {
 
   return (
     <>
+      <Portal>
       {notification && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className={`flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border text-xs font-bold ${
@@ -219,6 +221,7 @@ export default function PedidosPage() {
           </div>
         </div>
       )}
+      </Portal>
 
       <header className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
@@ -401,6 +404,7 @@ export default function PedidosPage() {
         </section>
       </div>
 
+      <Portal>
       {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ORDEM DE SERVIÇO */}
       {orderToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -452,6 +456,7 @@ export default function PedidosPage() {
           </div>
         </div>
       )}
+      </Portal>
     </>
   );
 }

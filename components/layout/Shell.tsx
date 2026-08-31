@@ -64,6 +64,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         setAuthError('A senha deve conter no mínimo 6 caracteres.');
       } else if (code === 'auth/invalid-email') {
         setAuthError('O formato do e-mail inserido é inválido.');
+      } else if (code === 'auth/api-key-not-valid' || code.includes('api-key-not-valid')) {
+        setAuthError('Chave de API do Firebase inválida. Verifique as credenciais do projeto.');
+      } else if (code === 'auth/network-request-failed') {
+        setAuthError('Falha de conexão com os serviços de autenticação. Verifique sua conexão com a internet e tente novamente.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setAuthError('O login por e-mail e senha não está habilitado no console do Firebase.');
       } else {
         setAuthError('Erro na autenticação: ' + (err.message || 'Verifique seus dados e tente novamente.'));
       }

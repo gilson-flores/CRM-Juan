@@ -36,6 +36,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { getAssetUrl } from '@/lib/assetHelper';
 import { OfficialLogoSvg } from '@/lib/logoConstant';
+import { Portal } from '@/components/ui/Portal';
 
 // Helper para gerar identificadores únicos de forma segura
 let globalItemCounter = 1;
@@ -599,8 +600,9 @@ export default function OrcamentosPage() {
 
   return (
     <>
-      {/* Toast Notification */}
-      {notification && (
+      <Portal>
+        {/* Toast Notification */}
+        {notification && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className={`flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border text-xs font-bold ${
             notification.type === 'success' ? 'bg-[#141418] border-emerald-500/50 text-emerald-400' :
@@ -612,6 +614,7 @@ export default function OrcamentosPage() {
           </div>
         </div>
       )}
+      </Portal>
 
       {/* Header */}
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -1104,6 +1107,7 @@ export default function OrcamentosPage() {
 
       </div>
 
+      <Portal>
       {/* MODAL: RESTAURAR RASCUNHO / HISTÓRICO DE ORÇAMENTOS */}
       {isDraftsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -1771,6 +1775,7 @@ export default function OrcamentosPage() {
           </div>
         </div>
       )}
+      </Portal>
     </>
   );
 }
