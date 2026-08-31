@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { CompanySettings } from './firebase';
 import { logger } from './logger';
+import { getAssetUrl } from './assetHelper';
 
 export type PdfQuoteData = {
   quoteNumber: string;
@@ -214,7 +215,7 @@ const getLogoBase64 = async (companySettings?: Partial<CompanySettings>): Promis
       }
     };
     img.onerror = () => resolve('');
-    img.src = '/logo.svg';
+    img.src = getAssetUrl('/logo.svg');
   });
 };
 

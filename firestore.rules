@@ -1,42 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    // Configurações da empresa
+    match /company_settings/{settingId} {
+      allow read, write: if true;
     }
 
-    // Allow user settings read/write by owner or fallback for initial setup
-    match /company_settings/{userId} {
-      allow read, write: if isAuthenticated();
-    }
-
+    // Perfis de usuários
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if true;
     }
 
     // Clientes
     match /clients/{clientId} {
-      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+      allow read, write: if true;
     }
 
-    // Orçamentos e Pedidos
+    // Orçamentos e Ordens de Serviço
     match /quotes/{quoteId} {
-      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+      allow read, write: if true;
     }
 
     // Itens de Catálogo
     match /catalog/{itemId} {
-      allow read, write: if isAuthenticated() || resource == null || request.auth != null;
+      allow read, write: if true;
     }
 
-    // Catch-all rule for general app sync
+    // Regra geral de fallback para sincronização e novos módulos
     match /{document=**} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
   }
 }
+

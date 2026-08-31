@@ -176,6 +176,81 @@ export const saveCompanySettings = async (settings: CompanySettings): Promise<bo
   }
 };
 
+// ================= QUOTES (ORÇAMENTOS) =================
+export const saveQuoteToFirestore = async (quote: any): Promise<boolean> => {
+  if (!quote || !quote.id) return false;
+  try {
+    const docRef = doc(db, 'quotes', String(quote.id));
+    await setDoc(docRef, quote, { merge: true });
+    return true;
+  } catch (e) {
+    console.error('Error saving quote to Firestore:', e);
+    return false;
+  }
+};
+
+export const deleteQuoteFromFirestore = async (id: string): Promise<boolean> => {
+  if (!id) return false;
+  try {
+    const docRef = doc(db, 'quotes', String(id));
+    await deleteDoc(docRef);
+    return true;
+  } catch (e) {
+    console.error('Error deleting quote from Firestore:', e);
+    return false;
+  }
+};
+
+// ================= CLIENTS (CLIENTES) =================
+export const saveClientToFirestore = async (client: any): Promise<boolean> => {
+  if (!client || !client.id) return false;
+  try {
+    const docRef = doc(db, 'clients', String(client.id));
+    await setDoc(docRef, client, { merge: true });
+    return true;
+  } catch (e) {
+    console.error('Error saving client to Firestore:', e);
+    return false;
+  }
+};
+
+export const deleteClientFromFirestore = async (id: string): Promise<boolean> => {
+  if (!id) return false;
+  try {
+    const docRef = doc(db, 'clients', String(id));
+    await deleteDoc(docRef);
+    return true;
+  } catch (e) {
+    console.error('Error deleting client from Firestore:', e);
+    return false;
+  }
+};
+
+// ================= CATALOG (CATÁLOGO) =================
+export const saveCatalogItemToFirestore = async (item: any): Promise<boolean> => {
+  if (!item || !item.id) return false;
+  try {
+    const docRef = doc(db, 'catalog', String(item.id));
+    await setDoc(docRef, item, { merge: true });
+    return true;
+  } catch (e) {
+    console.error('Error saving catalog item to Firestore:', e);
+    return false;
+  }
+};
+
+export const deleteCatalogItemFromFirestore = async (id: string): Promise<boolean> => {
+  if (!id) return false;
+  try {
+    const docRef = doc(db, 'catalog', String(id));
+    await deleteDoc(docRef);
+    return true;
+  } catch (e) {
+    console.error('Error deleting catalog item from Firestore:', e);
+    return false;
+  }
+};
+
 // ================= SYNC ALL LOCAL TO FIRESTORE =================
 export const syncAllLocalDataToFirestore = async (): Promise<{ success: boolean; message: string }> => {
   try {

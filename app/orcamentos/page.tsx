@@ -31,9 +31,10 @@ import {
 import type { Client } from '../clientes/page';
 import { useGoogleSheets, CatalogItem } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
-import { db } from '@/lib/firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
+import { getAssetUrl } from '@/lib/assetHelper';
 
 // Helper para gerar identificadores únicos de forma segura
 let globalItemCounter = 1;
@@ -188,7 +189,52 @@ export default function OrcamentosPage() {
       }
     }, 0);
 
-    return () => clearTimeout(timer);
+    // Sincronização em tempo real do Firestore
+    const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
+      if (!snapshot.empty) {
+        const list: FullDraft[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as FullDraft);
+        });
+        if (list.length > 0) {
+          setSavedDrafts(list);
+          localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(list));
+        }
+      }
+    }, (err) => console.warn('Firestore quotes listener:', err));
+
+    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
+      if (!snapshot.empty) {
+        const list: Client[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Client);
+        });
+        if (list.length > 0) {
+          setClients(list);
+          localStorage.setItem('@jc-eletricista:clients', JSON.stringify(list));
+        }
+      }
+    }, (err) => console.warn('Firestore clients listener:', err));
+
+    const unsubCatalog = onSnapshot(collection(db, 'catalog'), (snapshot) => {
+      if (!snapshot.empty) {
+        const list: CatalogItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as CatalogItem);
+        });
+        if (list.length > 0) {
+          setCatalogItems(list);
+          localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(list));
+        }
+      }
+    }, (err) => console.warn('Firestore catalog listener:', err));
+
+    return () => {
+      clearTimeout(timer);
+      unsubQuotes();
+      unsubClients();
+      unsubCatalog();
+    };
   }, []);
 
   const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -270,6 +316,14 @@ export default function OrcamentosPage() {
     setSavedDrafts(updatedDrafts);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
 
+    // Salvar no Firestore de forma persistente
+    try {
+      await saveQuoteToFirestore(newDraft);
+      logger.info('Orçamentos', `Orçamento #${newDraft.quoteNumber} salvo com sucesso no Firestore.`);
+    } catch (fsErr: any) {
+      logger.warn('Orçamentos', `Aviso ao salvar orçamento no Firestore: ${fsErr?.message || fsErr}`);
+    }
+
     // Salvar itens individuais no log de itens com ID próprio e preço
     const savedLog = localStorage.getItem('@jc-eletricista:quote_items_log');
     const existingLog: any[] = savedLog ? JSON.parse(savedLog) : [];
@@ -343,7 +397,7 @@ export default function OrcamentosPage() {
 
       // 2. Remove do Firestore de forma assíncrona
       try {
-        await deleteDoc(doc(db, 'quotes', String(target.id)));
+        await deleteQuoteFromFirestore(target.id);
         logger.info('Orçamentos', `Orçamento #${target.quoteNumber} excluído com sucesso do Firestore.`);
       } catch (firestoreErr: any) {
         logger.warn('Orçamentos', `Aviso ao deletar do Firestore: ${firestoreErr?.message || firestoreErr}`);
@@ -393,9 +447,11 @@ export default function OrcamentosPage() {
 
       // Atualiza status para 'enviado' se for rascunho
       if (!draft.status || draft.status === 'rascunho') {
-        const updated = savedDrafts.map(d => d.id === draft.id ? { ...d, status: 'enviado' as const } : d);
+        const updatedDraft = { ...draft, status: 'enviado' as const };
+        const updated = savedDrafts.map(d => d.id === draft.id ? updatedDraft : d);
         setSavedDrafts(updated);
         localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
+        saveQuoteToFirestore(updatedDraft).catch(e => console.warn('Firestore save quote:', e));
       }
 
       showNotification(`PDF do orçamento #${draft.quoteNumber} gerado com sucesso!`);
@@ -408,9 +464,14 @@ export default function OrcamentosPage() {
   const handleToggleStatus = (e: React.MouseEvent, draftId: string, currentStatus?: string) => {
     e.stopPropagation();
     const newStatus = currentStatus === 'enviado' ? 'rascunho' : 'enviado';
+    const draftTarget = savedDrafts.find(d => d.id === draftId);
+    const updatedDraft = draftTarget ? { ...draftTarget, status: newStatus as any } : null;
     const updated = savedDrafts.map(d => d.id === draftId ? { ...d, status: newStatus as any } : d);
     setSavedDrafts(updated);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updated));
+    if (updatedDraft) {
+      saveQuoteToFirestore(updatedDraft).catch(e => console.warn('Firestore save quote:', e));
+    }
     showNotification(`Status alterado para ${newStatus === 'enviado' ? 'Enviado' : 'Rascunho'}.`, 'info');
   };
 
@@ -449,11 +510,13 @@ export default function OrcamentosPage() {
     const timeFormatted = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const existingDraftIndex = savedDrafts.findIndex(d => d.quoteNumber === quoteNumber);
     let updatedDrafts = [...savedDrafts];
+    let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      updatedDrafts[existingDraftIndex] = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
-      updatedDrafts = [{
+      quoteToSave = {
         id: generateItemId('DRAFT'),
         quoteNumber,
         clientName: selectedClient || 'Cliente',
@@ -465,10 +528,12 @@ export default function OrcamentosPage() {
         date: dateFormatted,
         savedAt: `${dateFormatted} às ${timeFormatted}`,
         status: 'enviado'
-      }, ...savedDrafts];
+      };
+      updatedDrafts = [quoteToSave, ...savedDrafts];
     }
     setSavedDrafts(updatedDrafts);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
+    saveQuoteToFirestore(quoteToSave).catch(e => console.warn('Firestore save quote:', e));
 
     showNotification('PDF gerado com sucesso! Arquivo pronto para impressão ou WhatsApp.');
   };
@@ -481,11 +546,13 @@ export default function OrcamentosPage() {
     const timeFormatted = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const existingDraftIndex = savedDrafts.findIndex(d => d.quoteNumber === quoteNumber);
     let updatedDrafts = [...savedDrafts];
+    let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      updatedDrafts[existingDraftIndex] = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
-      updatedDrafts = [{
+      quoteToSave = {
         id: generateItemId('DRAFT'),
         quoteNumber,
         clientName: selectedClient || 'Cliente',
@@ -497,10 +564,12 @@ export default function OrcamentosPage() {
         date: dateFormatted,
         savedAt: `${dateFormatted} às ${timeFormatted}`,
         status: 'enviado'
-      }, ...savedDrafts];
+      };
+      updatedDrafts = [quoteToSave, ...savedDrafts];
     }
     setSavedDrafts(updatedDrafts);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
+    saveQuoteToFirestore(quoteToSave).catch(e => console.warn('Firestore save quote:', e));
     
     window.print();
   };
@@ -866,7 +935,7 @@ export default function OrcamentosPage() {
                   <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
                     <div className="flex items-center gap-3">
                       <img 
-                        src="/logo.svg" 
+                        src={getAssetUrl('/logo.svg')} 
                         alt="Logo JC Eletricista" 
                         className="w-12 h-12 rounded-lg object-contain shrink-0 shadow-sm border border-[#26262e] bg-[#0c0c0f]" 
                       />
@@ -1370,7 +1439,7 @@ export default function OrcamentosPage() {
                   <div className="flex items-center justify-between border-b-2 border-gray-900 pb-4 mb-4">
                     <div className="flex items-center gap-3.5">
                       <img 
-                        src="/logo.svg" 
+                        src={getAssetUrl('/logo.svg')} 
                         alt="Logo JC Eletricista" 
                         className="w-14 h-14 rounded-lg object-contain shrink-0 shadow-sm border border-[#26262e] bg-[#0c0c0f]" 
                       />

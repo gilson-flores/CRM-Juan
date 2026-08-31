@@ -5,8 +5,8 @@ import type { FullDraft } from '../orcamentos/page';
 import type { Client } from '../clientes/page';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
-import { db } from '@/lib/firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 
 export default function PedidosPage() {
@@ -33,7 +33,24 @@ export default function PedidosPage() {
         } catch (e) {}
       }
     }, 0);
-    return () => clearTimeout(timer);
+
+    const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
+      if (!snapshot.empty) {
+        const list: FullDraft[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as FullDraft);
+        });
+        if (list.length > 0) {
+          setQuotes(list);
+          localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(list));
+        }
+      }
+    }, (err) => console.warn('Firestore quotes listener:', err));
+
+    return () => {
+      clearTimeout(timer);
+      unsubQuotes();
+    };
   }, []);
 
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -48,6 +65,12 @@ export default function PedidosPage() {
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
+    
+    const targetOrder = updatedQuotes.find(q => q.id === selectedQuoteId);
+    if (targetOrder) {
+      saveQuoteToFirestore(targetOrder).catch(e => console.warn('Firestore save order:', e));
+    }
+
     setSelectedQuoteId('');
     showNotification('Orçamento transformado em Ordem de Serviço com sucesso!');
     syncAllData().catch(e => console.error('Sync failed', e));
@@ -78,7 +101,7 @@ export default function PedidosPage() {
 
       // 2. Apagar no Firestore
       try {
-        await deleteDoc(doc(db, 'quotes', String(target.id)));
+        await deleteQuoteFromFirestore(target.id);
         logger.info('Pedidos', `O.S. #${target.quoteNumber} removida do Firestore`);
       } catch (err) {
         console.warn('Erro ao deletar O.S. no Firestore:', err);
@@ -104,6 +127,12 @@ export default function PedidosPage() {
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
+    
+    const targetOrder = updatedQuotes.find(q => q.id === id);
+    if (targetOrder) {
+      saveQuoteToFirestore(targetOrder).catch(e => console.warn('Firestore save order:', e));
+    }
+
     showNotification('Ordem de Serviço marcada como concluída!', 'success');
     syncAllData().catch(e => console.error('Sync failed', e));
     if (typeof window !== 'undefined') {
@@ -122,6 +151,12 @@ export default function PedidosPage() {
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
+    
+    const targetOrder = updatedQuotes.find(q => q.id === id);
+    if (targetOrder) {
+      saveQuoteToFirestore(targetOrder).catch(e => console.warn('Firestore save order:', e));
+    }
+
     showNotification('Status revertido para O.S. Em Andamento', 'info');
     syncAllData().catch(e => console.error('Sync failed', e));
   };
