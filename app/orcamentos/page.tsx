@@ -35,6 +35,7 @@ import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/fireba
 import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { getAssetUrl } from '@/lib/assetHelper';
+import { OfficialLogoSvg } from '@/lib/logoConstant';
 
 // Helper para gerar identificadores únicos de forma segura
 let globalItemCounter = 1;
@@ -191,15 +192,32 @@ export default function OrcamentosPage() {
 
     // Sincronização em tempo real do Firestore
     const unsubQuotes = onSnapshot(collection(db, 'quotes'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: FullDraft[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as FullDraft);
-        });
-        if (list.length > 0) {
-          setSavedDrafts(list);
-          localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(list));
+      const list: FullDraft[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as FullDraft);
+      });
+      
+      // Merge local data that might not be in Firestore yet
+      const savedDraftsList = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
+      if (savedDraftsList) {
+        try {
+          const localDrafts = JSON.parse(savedDraftsList) as FullDraft[];
+          localDrafts.forEach(localItem => {
+            const exists = list.find(dbItem => dbItem.id === localItem.id);
+            if (!exists) {
+              list.push(localItem);
+              // Push this missing item to Firestore in the background
+              saveQuoteToFirestore(localItem).catch(e => console.warn('Auto-sync missing item to Firestore failed:', e));
+            }
+          });
+        } catch (e) {
+          console.warn('Error parsing local drafts for sync:', e);
         }
+      }
+
+      if (list.length > 0) {
+        setSavedDrafts(list);
+        localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(list));
       }
     }, (err) => console.warn('Firestore quotes listener:', err));
 

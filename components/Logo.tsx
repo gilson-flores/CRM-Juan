@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Phone, Instagram, Zap } from 'lucide-react';
-import { getAssetUrl } from '@/lib/assetHelper';
+import { OfficialLogoSvg } from '@/lib/logoConstant';
 
 interface LogoProps {
   variant?: 'full' | 'compact' | 'horizontal';
@@ -15,15 +15,7 @@ export function Logo({ variant = 'full', className = '', size = 'md' }: LogoProp
     return (
       <div className={`flex items-center gap-3 ${className}`}>
         <div className="w-10 h-10 rounded-xl bg-[#0e0e11] border border-[#FF7A00]/40 flex items-center justify-center shadow-lg shadow-[#FF7A00]/10 shrink-0 relative overflow-hidden p-0.5">
-          <img 
-            src={getAssetUrl('/logo.svg')} 
-            alt="JC Eletricista" 
-            className="w-full h-full object-contain rounded-lg"
-            onError={(e) => {
-              // Fallback gracioso se SVG não carregar
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
+          <OfficialLogoSvg className="w-full h-full object-contain rounded-lg" />
         </div>
         <div className="flex flex-col">
           <span className="font-black text-sm uppercase tracking-wider text-white leading-none">
@@ -41,11 +33,7 @@ export function Logo({ variant = 'full', className = '', size = 'md' }: LogoProp
     return (
       <div className={`flex items-center gap-4 bg-[#0a0a0a] p-3 rounded-xl border border-zinc-800/80 shadow-md ${className}`}>
         <div className="w-12 h-12 rounded-xl bg-black border border-[#FF7A00]/50 flex items-center justify-center shadow-inner shrink-0 p-1">
-          <img 
-            src={getAssetUrl('/logo.svg')} 
-            alt="JC Eletricista" 
-            className="w-full h-full object-contain rounded-lg"
-          />
+          <OfficialLogoSvg className="w-full h-full object-contain rounded-lg" />
         </div>
         <div className="flex flex-col">
           <span className="font-black text-base uppercase tracking-tight text-white leading-none">
@@ -73,11 +61,7 @@ export function Logo({ variant = 'full', className = '', size = 'md' }: LogoProp
 
       {/* Main Official Logo Image / SVG */}
       <div className="relative mb-2 flex items-center justify-center w-full max-w-[210px] aspect-square rounded-2xl overflow-hidden border border-[#222228] bg-[#09090c] shadow-lg shadow-black/60 p-2">
-        <img 
-          src={getAssetUrl('/logo.svg')} 
-          alt="JC Eletricista - Residencial e Comercial"
-          className="w-full h-full object-contain drop-shadow-[0_4px_16px_rgba(255,122,0,0.25)]"
-        />
+        <OfficialLogoSvg className="w-full h-full object-contain drop-shadow-[0_4px_16px_rgba(255,122,0,0.25)]" />
       </div>
 
       {/* Contact Info */}

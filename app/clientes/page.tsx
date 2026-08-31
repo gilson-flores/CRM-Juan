@@ -57,16 +57,54 @@ export default function ClientesPage() {
   // Load data from localStorage on mount (Client-side only to avoid SSR hydration mismatch)
   useEffect(() => {
     const saved = localStorage.getItem('@jc-eletricista:clients');
+    let timeoutId: NodeJS.Timeout;
     if (saved) {
       try {
-        const timeoutId = setTimeout(() => {
+        timeoutId = setTimeout(() => {
           setClients(JSON.parse(saved));
         }, 0);
-        return () => clearTimeout(timeoutId);
       } catch (e) {
         console.error('Error parsing clients from local storage', e);
       }
     }
+
+    // Sincronização em tempo real do Firestore
+    const { onSnapshot, collection, setDoc, doc } = require('firebase/firestore');
+    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot: any) => {
+      const list: Client[] = [];
+      snapshot.forEach((docSnap: any) => {
+        list.push(docSnap.data() as Client);
+      });
+
+      // Merge local data that might not be in Firestore yet
+      const savedClientsList = localStorage.getItem('@jc-eletricista:clients');
+      if (savedClientsList) {
+        try {
+          const localClients = JSON.parse(savedClientsList) as Client[];
+          localClients.forEach(localItem => {
+            const exists = list.find(dbItem => dbItem.id === localItem.id);
+            if (!exists) {
+              list.push(localItem);
+              // Push this missing item to Firestore in the background
+              setDoc(doc(db, 'clients', String(localItem.id)), localItem, { merge: true })
+                .catch((e: any) => console.warn('Auto-sync missing item to Firestore failed:', e));
+            }
+          });
+        } catch (e) {
+          console.warn('Error parsing local clients for sync:', e);
+        }
+      }
+
+      if (list.length > 0) {
+        setClients(list);
+        localStorage.setItem('@jc-eletricista:clients', JSON.stringify(list));
+      }
+    }, (err: any) => console.warn('Firestore clients listener:', err));
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      unsubClients();
+    };
   }, []);
 
   const { syncAllData, isConnected } = useGoogleSheets();

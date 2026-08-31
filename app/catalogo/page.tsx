@@ -90,19 +90,57 @@ export default function CatalogoPage() {
 
   // Carregar catálogo de itens do LocalStorage
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const saved = localStorage.getItem('@jc-eletricista:catalog_items');
-      if (saved) {
-        try {
+    let timer: NodeJS.Timeout;
+    const saved = localStorage.getItem('@jc-eletricista:catalog_items');
+    if (saved) {
+      try {
+        timer = setTimeout(() => {
           setCatalogItems(JSON.parse(saved));
-        } catch {
-          setCatalogItems([]);
-        }
-      } else {
-        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
+        }, 0);
+      } catch {
+        setCatalogItems([]);
       }
-    }, 0);
-    return () => clearTimeout(timer);
+    } else {
+      localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify([]));
+    }
+
+    // Sincronização em tempo real do Firestore
+    const { onSnapshot, collection, setDoc, doc } = require('firebase/firestore');
+    const unsubCatalog = onSnapshot(collection(db, 'catalog'), (snapshot: any) => {
+      const list: CatalogItem[] = [];
+      snapshot.forEach((docSnap: any) => {
+        list.push(docSnap.data() as CatalogItem);
+      });
+
+      // Merge local data that might not be in Firestore yet
+      const savedCatalogList = localStorage.getItem('@jc-eletricista:catalog_items');
+      if (savedCatalogList) {
+        try {
+          const localCatalog = JSON.parse(savedCatalogList) as CatalogItem[];
+          localCatalog.forEach(localItem => {
+            const exists = list.find(dbItem => dbItem.id === localItem.id);
+            if (!exists) {
+              list.push(localItem);
+              // Push this missing item to Firestore in the background
+              setDoc(doc(db, 'catalog', String(localItem.id)), localItem, { merge: true })
+                .catch((e: any) => console.warn('Auto-sync missing item to Firestore failed:', e));
+            }
+          });
+        } catch (e) {
+          console.warn('Error parsing local catalog for sync:', e);
+        }
+      }
+
+      if (list.length > 0) {
+        setCatalogItems(list);
+        localStorage.setItem('@jc-eletricista:catalog_items', JSON.stringify(list));
+      }
+    }, (err: any) => console.warn('Firestore catalog listener:', err));
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubCatalog();
+    };
   }, []);
 
   const saveCatalogItems = async (items: CatalogItem[]) => {
