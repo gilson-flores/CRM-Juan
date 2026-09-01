@@ -27,10 +27,13 @@ import {
   CheckCircle2,
   UserCheck,
   UserX,
-  KeyRound
+  KeyRound,
+  Plus,
+  Star,
+  ListOrdered
 } from 'lucide-react';
 import { useFirebaseData } from '@/hooks/useFirebaseData';
-import type { CompanySettings } from '@/lib/firebase';
+import { DEFAULT_PAYMENT_METHODS, type CompanySettings } from '@/lib/firebase';
 
 export default function ConfiguracoesPage() {
   const { 
@@ -49,13 +52,73 @@ export default function ConfiguracoesPage() {
 
   const [activeTab, setActiveTab] = useState<'empresa' | 'financeiro' | 'orcamentos' | 'seguranca'>('empresa');
   const [formData, setFormData] = useState<CompanySettings>(companySettings);
+  const [newPaymentMethod, setNewPaymentMethod] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFormData(companySettings);
+    const initialMethods = companySettings.paymentMethods && companySettings.paymentMethods.length > 0 
+      ? companySettings.paymentMethods 
+      : DEFAULT_PAYMENT_METHODS;
+    
+    setFormData({
+      ...companySettings,
+      paymentMethods: initialMethods,
+      defaultPaymentMethod: companySettings.defaultPaymentMethod || initialMethods[0] || 'PIX (À Vista)'
+    });
   }, [companySettings]);
+
+  const handleAddPaymentMethod = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newPaymentMethod.trim();
+    if (!trimmed) return;
+
+    const currentMethods = formData.paymentMethods || DEFAULT_PAYMENT_METHODS;
+    if (currentMethods.some(m => m.toLowerCase() === trimmed.toLowerCase())) {
+      setStatusMessage({ text: 'Esta forma de pagamento já está cadastrada.', type: 'error' });
+      return;
+    }
+
+    const updated = [...currentMethods, trimmed];
+    setFormData({
+      ...formData,
+      paymentMethods: updated,
+      defaultPaymentMethod: formData.defaultPaymentMethod || trimmed
+    });
+    setNewPaymentMethod('');
+  };
+
+  const handleRemovePaymentMethod = (indexToRemove: number) => {
+    const currentMethods = formData.paymentMethods || DEFAULT_PAYMENT_METHODS;
+    const itemToRemove = currentMethods[indexToRemove];
+    const updated = currentMethods.filter((_, idx) => idx !== indexToRemove);
+    
+    let newDefault = formData.defaultPaymentMethod;
+    if (newDefault === itemToRemove) {
+      newDefault = updated.length > 0 ? updated[0] : '';
+    }
+
+    setFormData({
+      ...formData,
+      paymentMethods: updated,
+      defaultPaymentMethod: newDefault
+    });
+  };
+
+  const handleSetDefaultPaymentMethod = (method: string) => {
+    setFormData({
+      ...formData,
+      defaultPaymentMethod: method
+    });
+  };
+
+  const handleRestoreDefaultPaymentMethods = () => {
+    setFormData({
+      ...formData,
+      paymentMethods: DEFAULT_PAYMENT_METHODS,
+      defaultPaymentMethod: DEFAULT_PAYMENT_METHODS[0]
+    });
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -289,76 +352,185 @@ export default function ConfiguracoesPage() {
 
         {/* ABA 2: PAGAMENTO & PIX */}
         {activeTab === 'financeiro' && (
-          <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl space-y-6 animate-in fade-in duration-200">
-            <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <CreditCard size={18} className="text-[#FF7A00]" />
-                Dados Bancários & Chave PIX para Recebimento
-              </h2>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                Facilite a aprovação do orçamento inserindo sua Chave PIX diretamente no rodapé das propostas enviadas aos clientes.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* PIX Settings Card */}
+            <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl space-y-6">
               <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                  Tipo da Chave PIX
-                </label>
-                <select
-                  value={formData.pixType}
-                  onChange={(e) => setFormData({ ...formData, pixType: e.target.value })}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
-                >
-                  <option value="Telefone">Telefone Celular</option>
-                  <option value="CNPJ">CNPJ</option>
-                  <option value="CPF">CPF</option>
-                  <option value="E-mail">E-mail</option>
-                  <option value="Chave Aleatória">Chave Aleatória (EVP)</option>
-                </select>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <CreditCard size={18} className="text-[#FF7A00]" />
+                  Dados Bancários & Chave PIX para Recebimento
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Facilite a aprovação do orçamento inserindo sua Chave PIX diretamente no rodapé das propostas enviadas aos clientes.
+                </p>
               </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                  Chave PIX
-                </label>
-                <input
-                  type="text"
-                  placeholder="Digite sua chave PIX..."
-                  value={formData.pixKey}
-                  onChange={(e) => setFormData({ ...formData, pixKey: e.target.value })}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                    Tipo da Chave PIX
+                  </label>
+                  <select
+                    value={formData.pixType}
+                    onChange={(e) => setFormData({ ...formData, pixType: e.target.value })}
+                    className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                  >
+                    <option value="Telefone">Telefone Celular</option>
+                    <option value="CNPJ">CNPJ</option>
+                    <option value="CPF">CPF</option>
+                    <option value="E-mail">E-mail</option>
+                    <option value="Chave Aleatória">Chave Aleatória (EVP)</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                    Chave PIX
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Digite sua chave PIX..."
+                    value={formData.pixKey}
+                    onChange={(e) => setFormData({ ...formData, pixKey: e.target.value })}
+                    className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                    Nome do Titular da Conta / Banco
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Juan Carlos - Nubank / Banco do Brasil"
+                    value={formData.pixHolder}
+                    onChange={(e) => setFormData({ ...formData, pixHolder: e.target.value })}
+                    className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
+                  />
+                </div>
               </div>
 
-              <div className="md:col-span-3">
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                  Nome do Titular da Conta / Banco
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Juan Carlos - Nubank / Banco do Brasil"
-                  value={formData.pixHolder}
-                  onChange={(e) => setFormData({ ...formData, pixHolder: e.target.value })}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
-                />
-              </div>
+              {/* Visual Preview */}
+              {formData.pixKey && (
+                <div className="bg-[#141418] border border-emerald-500/20 p-4 rounded-xl flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-500/10 rounded-lg text-emerald-400 shrink-0">
+                    <QrCode size={22} />
+                  </div>
+                  <div className="text-xs text-zinc-300">
+                    <span className="font-bold text-white block">Como sairá no PDF para o cliente:</span>
+                    <span className="text-zinc-400">
+                      Chave PIX ({formData.pixType}): <strong className="text-emerald-400 font-mono">{formData.pixKey}</strong> ({formData.pixHolder || formData.ownerName})
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Visual Preview */}
-            {formData.pixKey && (
-              <div className="bg-[#141418] border border-emerald-500/20 p-4 rounded-xl flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-500/10 rounded-lg text-emerald-400 shrink-0">
-                  <QrCode size={22} />
+            {/* Registro de Formas de Pagamento Card */}
+            <div className="bg-[#0e0e11] border border-[#222226] rounded-2xl p-6 shadow-xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <ListOrdered size={18} className="text-[#FF7A00]" />
+                    Registro de Formas de Pagamento
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Cadastre as opções que aparecerão na lista suspensa de orçamentos e ordens de serviço.
+                  </p>
                 </div>
-                <div className="text-xs text-zinc-300">
-                  <span className="font-bold text-white block">Como sairá no PDF para o cliente:</span>
-                  <span className="text-zinc-400">
-                    Chave PIX ({formData.pixType}): <strong className="text-emerald-400 font-mono">{formData.pixKey}</strong> ({formData.pixHolder || formData.ownerName})
-                  </span>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefaultPaymentMethods}
+                  className="self-start sm:self-auto text-[11px] text-zinc-400 hover:text-white flex items-center gap-1 border border-[#27272e] px-2.5 py-1 rounded-lg transition-colors"
+                  title="Restaurar lista padrão"
+                >
+                  <RefreshCw size={12} />
+                  Restaurar Padrões
+                </button>
+              </div>
+
+              {/* Input to add new payment method */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="Ex: Cartão 6x sem juros, 50% adiantado, etc."
+                  value={newPaymentMethod}
+                  onChange={(e) => setNewPaymentMethod(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPaymentMethod();
+                    }
+                  }}
+                  className="flex-1 bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddPaymentMethod}
+                  disabled={!newPaymentMethod.trim()}
+                  className="flex items-center justify-center gap-1.5 bg-[#FF7A00] hover:bg-[#FF8A00] disabled:bg-[#1f1f23] disabled:text-zinc-600 disabled:cursor-not-allowed text-black font-black uppercase tracking-wider text-xs px-4 py-2.5 rounded-xl transition-all shadow-md shadow-[#FF7A00]/10"
+                >
+                  <Plus size={14} />
+                  Adicionar
+                </button>
+              </div>
+
+              {/* List of registered payment methods */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                  Formas Cadastradas ({formData.paymentMethods?.length || 0})
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {(formData.paymentMethods || DEFAULT_PAYMENT_METHODS).map((method, index) => {
+                    const isDefault = formData.defaultPaymentMethod === method;
+                    return (
+                      <div
+                        key={`${method}-${index}`}
+                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          isDefault 
+                            ? 'bg-[#18181f] border-[#FF7A00]/50 shadow-md shadow-[#FF7A00]/5' 
+                            : 'bg-[#141418] border-[#222228] hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                          <span className="w-6 h-6 rounded-lg bg-[#202026] text-zinc-400 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+                            {index + 1}
+                          </span>
+                          <span className="text-xs font-semibold text-white truncate">
+                            {method}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleSetDefaultPaymentMethod(method)}
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${
+                              isDefault 
+                                ? 'bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/40' 
+                                : 'bg-[#202026] text-zinc-400 hover:text-white border border-transparent'
+                            }`}
+                            title={isDefault ? 'Forma de pagamento padrão' : 'Definir como padrão'}
+                          >
+                            <Star size={11} className={isDefault ? 'fill-[#FF7A00]' : ''} />
+                            {isDefault ? 'Padrão' : 'Definir Padrão'}
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePaymentMethod(index)}
+                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
+                            title="Remover forma de pagamento"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -371,24 +543,57 @@ export default function ConfiguracoesPage() {
                 Termos, Prazos e Condições Padrão de Serviço
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Defina o texto padrão de garantias e condições que serão carregados automaticamente em cada novo orçamento gerado.
+                Defina o prazo de validade, forma de pagamento e textos padrão carregados automaticamente nas propostas e ordens de serviço.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Validade do Orçamento */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
                   <Calendar size={13} className="text-[#FF7A00]" />
-                  Validade do Orçamento (dias)
+                  Prazo de Validade Padrão
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="90"
-                  value={formData.defaultValidityDays}
-                  onChange={(e) => setFormData({ ...formData, defaultValidityDays: parseInt(e.target.value) || 15 })}
+                <div className="space-y-2">
+                  <select
+                    value={formData.defaultValidityDays}
+                    onChange={(e) => setFormData({ ...formData, defaultValidityDays: parseInt(e.target.value) || 15 })}
+                    className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                  >
+                    <option value={5}>5 dias corridos</option>
+                    <option value={7}>7 dias corridos</option>
+                    <option value={10}>10 dias corridos</option>
+                    <option value={15}>15 dias corridos (Recomendado)</option>
+                    <option value={20}>20 dias corridos</option>
+                    <option value={30}>30 dias corridos</option>
+                    <option value={45}>45 dias corridos</option>
+                    <option value={60}>60 dias corridos</option>
+                    <option value={90}>90 dias corridos</option>
+                  </select>
+                  <p className="text-[10px] text-zinc-500">
+                    O orçamento carregará este prazo por padrão com opção de troca rápida no dropdown.
+                  </p>
+                </div>
+              </div>
+
+              {/* Forma de Pagamento Padrão */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                  <CreditCard size={13} className="text-[#FF7A00]" />
+                  Forma de Pagamento Padrão Selecionada
+                </label>
+                <select
+                  value={formData.defaultPaymentMethod || (formData.paymentMethods?.[0] || 'PIX (À Vista)')}
+                  onChange={(e) => setFormData({ ...formData, defaultPaymentMethod: e.target.value })}
                   className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
-                />
+                >
+                  {(formData.paymentMethods || DEFAULT_PAYMENT_METHODS).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  Pode ser gerenciada e expandida na aba &quot;Pagamento &amp; PIX&quot;.
+                </p>
               </div>
 
               <div className="md:col-span-3">

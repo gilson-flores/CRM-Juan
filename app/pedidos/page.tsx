@@ -1,11 +1,11 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { CheckCircle, Clock, ArrowRight, Search, FileText, CheckSquare, Trash2, Calendar, TrendingUp, FileDown, Printer, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Clock, ArrowRight, Search, FileText, CheckSquare, Trash2, Calendar, TrendingUp, FileDown, Printer, AlertTriangle, CreditCard, ShieldCheck } from 'lucide-react';
 import type { FullDraft } from '../orcamentos/page';
 import type { Client } from '../clientes/page';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
-import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/firebase';
+import { db, saveQuoteToFirestore, deleteQuoteFromFirestore, DEFAULT_PAYMENT_METHODS } from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { Portal } from '@/components/ui/Portal';
@@ -14,6 +14,9 @@ export default function PedidosPage() {
   const [quotes, setQuotes] = useState<FullDraft[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
+  const [registeredPaymentMethods, setRegisteredPaymentMethods] = useState<string[]>(DEFAULT_PAYMENT_METHODS);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(DEFAULT_PAYMENT_METHODS[0]);
+  const [selectedValidityDays, setSelectedValidityDays] = useState<number>(15);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<FullDraft | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -23,6 +26,8 @@ export default function PedidosPage() {
     const timer = setTimeout(() => {
       const saved = localStorage.getItem('@jc-eletricista:saved_drafts_v2');
       const savedClients = localStorage.getItem('@jc-eletricista:clients');
+      const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
+
       if (saved) {
         try {
           setQuotes(JSON.parse(saved));
@@ -31,6 +36,22 @@ export default function PedidosPage() {
       if (savedClients) {
         try {
           setClients(JSON.parse(savedClients));
+        } catch (e) {}
+      }
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings);
+          if (parsed.paymentMethods && Array.isArray(parsed.paymentMethods) && parsed.paymentMethods.length > 0) {
+            setRegisteredPaymentMethods(parsed.paymentMethods);
+            if (parsed.defaultPaymentMethod) {
+              setSelectedPaymentMethod(parsed.defaultPaymentMethod);
+            } else {
+              setSelectedPaymentMethod(parsed.paymentMethods[0]);
+            }
+          }
+          if (parsed.defaultValidityDays) {
+            setSelectedValidityDays(Number(parsed.defaultValidityDays) || 15);
+          }
         } catch (e) {}
       }
     }, 0);
@@ -54,6 +75,21 @@ export default function PedidosPage() {
     };
   }, []);
 
+  // When selected quote changes, adopt its payment method and validity if set
+  useEffect(() => {
+    if (selectedQuoteId) {
+      const quote = quotes.find(q => q.id === selectedQuoteId);
+      if (quote) {
+        if (quote.paymentMethod) {
+          setSelectedPaymentMethod(quote.paymentMethod);
+        }
+        if (quote.validityDays) {
+          setSelectedValidityDays(Number(quote.validityDays) || 15);
+        }
+      }
+    }
+  }, [selectedQuoteId, quotes]);
+
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ text, type });
     setTimeout(() => setNotification(null), 4000);
@@ -62,7 +98,14 @@ export default function PedidosPage() {
   const handleTransformToOrder = () => {
     if (!selectedQuoteId) return;
     const updatedQuotes = quotes.map(q => 
-      q.id === selectedQuoteId ? { ...q, status: 'pedido' as const } : q
+      q.id === selectedQuoteId 
+        ? { 
+            ...q, 
+            status: 'pedido' as const,
+            paymentMethod: selectedPaymentMethod,
+            validityDays: selectedValidityDays
+          } 
+        : q
     );
     setQuotes(updatedQuotes);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedQuotes));
@@ -183,6 +226,8 @@ export default function PedidosPage() {
         discount: order.discount || 0,
         total: order.total,
         observations: order.observations,
+        paymentMethod: order.paymentMethod || selectedPaymentMethod,
+        validityDays: order.validityDays || selectedValidityDays,
         companySettings,
         includeWarranty: true, // OBRIGATÓRIO na Ordem de Serviço
         documentType: 'ordem_servico'
@@ -262,7 +307,10 @@ export default function PedidosPage() {
             Gerar Ordem de Serviço
           </h2>
           <div className="flex flex-col gap-3">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Selecione o Orçamento Pendente</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Selecione o Orçamento Pendente</label>
+              <a href="/clientes" className="text-[10px] text-[#FF7A00] hover:underline font-bold">+ Novo Cliente</a>
+            </div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
               <select 
@@ -276,6 +324,68 @@ export default function PedidosPage() {
                 ))}
               </select>
             </div>
+
+            {/* Dropdown Forma de Pagamento */}
+            <div className="space-y-1.5 pt-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                <CreditCard size={12} className="text-[#FF7A00]" />
+                Forma de Pagamento da O.S.
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedPaymentMethod}
+                  onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+                  className="w-full bg-[#141418] border border-[#27272a] rounded-lg py-2.5 px-3 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] appearance-none cursor-pointer"
+                >
+                  {registeredPaymentMethods.map((method) => (
+                    <option key={method} value={method} className="bg-[#141418] text-white">
+                      {method}
+                    </option>
+                  ))}
+                  {!registeredPaymentMethods.includes(selectedPaymentMethod) && (
+                    <option value={selectedPaymentMethod} className="bg-[#141418] text-white">
+                      {selectedPaymentMethod}
+                    </option>
+                  )}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                  <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Dropdown Prazo de Validade / Execução */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar size={12} className="text-[#FF7A00]" />
+                Prazo de Validade / Execução
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedValidityDays}
+                  onChange={(e) => setSelectedValidityDays(Number(e.target.value))}
+                  className="w-full bg-[#141418] border border-[#27272a] rounded-lg py-2.5 px-3 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] appearance-none cursor-pointer"
+                >
+                  <option value={5} className="bg-[#141418] text-white">5 dias corridos</option>
+                  <option value={7} className="bg-[#141418] text-white">7 dias corridos</option>
+                  <option value={10} className="bg-[#141418] text-white">10 dias corridos</option>
+                  <option value={15} className="bg-[#141418] text-white">15 dias corridos (Padrão)</option>
+                  <option value={20} className="bg-[#141418] text-white">20 dias corridos</option>
+                  <option value={30} className="bg-[#141418] text-white">30 dias corridos</option>
+                  <option value={45} className="bg-[#141418] text-white">45 dias corridos</option>
+                  <option value={60} className="bg-[#141418] text-white">60 dias corridos</option>
+                  <option value={90} className="bg-[#141418] text-white">90 dias corridos</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                  <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={handleTransformToOrder}
               disabled={!selectedQuoteId}
@@ -305,9 +415,19 @@ export default function PedidosPage() {
                         <h3 className="text-sm font-bold text-white">{order.clientName}</h3>
                         <span className="bg-[#1f1f28] text-zinc-400 text-[10px] px-2 py-0.5 rounded font-mono">O.S. #{order.quoteNumber}</span>
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] text-zinc-400 mt-2">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400 mt-2">
                         <span className="flex items-center gap-1"><Calendar size={12} /> {order.date}</span>
                         <span className="flex items-center gap-1"><FileText size={12} /> {order.items.length} itens</span>
+                        {order.paymentMethod && (
+                          <span className="bg-[#1f1f28] text-[#FF7A00] text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-medium border border-[#2e2e38]">
+                            <CreditCard size={10} /> {order.paymentMethod}
+                          </span>
+                        )}
+                        {order.validityDays && (
+                          <span className="bg-[#1f1f28] text-zinc-300 text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-medium border border-[#2e2e38]">
+                            <Clock size={10} /> {order.validityDays} dias
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex flex-col sm:items-end justify-between gap-3 sm:gap-0 border-t sm:border-t-0 sm:border-l border-[#27272a] pt-3 sm:pt-0 sm:pl-4 shrink-0">
@@ -364,8 +484,18 @@ export default function PedidosPage() {
                         <span className="bg-[#1f1f28] text-zinc-500 text-[10px] px-2 py-0.5 rounded font-mono">O.S. #{order.quoteNumber}</span>
                         <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded font-bold uppercase">Concluído</span>
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] text-zinc-500 mt-2">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 mt-2">
                         <span className="flex items-center gap-1"><Calendar size={12} /> {order.date}</span>
+                        {order.paymentMethod && (
+                          <span className="bg-[#141418] text-zinc-400 text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-medium border border-[#222228]">
+                            <CreditCard size={10} /> {order.paymentMethod}
+                          </span>
+                        )}
+                        {order.validityDays && (
+                          <span className="bg-[#141418] text-zinc-400 text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-medium border border-[#222228]">
+                            <Clock size={10} /> {order.validityDays} dias
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex flex-col sm:items-end justify-between gap-3 sm:gap-0 border-t sm:border-t-0 sm:border-l border-[#242429] pt-3 sm:pt-0 sm:pl-4 shrink-0">

@@ -22,6 +22,8 @@ export type PdfQuoteData = {
   discount: number;
   total: number;
   observations?: string;
+  paymentMethod?: string;
+  validityDays?: number | string;
   companySettings?: Partial<CompanySettings>;
   includeWarranty?: boolean;
   documentType?: 'orcamento' | 'ordem_servico';
@@ -289,10 +291,16 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
   doc.text(docTitle, 196, 18, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(220, 220, 220);
-  doc.text(`${isOrder ? 'O.S. Nº:' : 'Nº:'} ${data.quoteNumber || '2026-001'}`, 196, 26, { align: 'right' });
-  doc.text(`Data: ${data.date || new Date().toLocaleDateString('pt-BR')}`, 196, 33, { align: 'right' });
+  doc.text(`${isOrder ? 'O.S. Nº:' : 'Nº:'} ${data.quoteNumber || '2026-001'}`, 196, 25, { align: 'right' });
+  doc.text(`Data: ${data.date || new Date().toLocaleDateString('pt-BR')}`, 196, 31, { align: 'right' });
+  
+  const validityDaysValue = data.validityDays || company.defaultValidityDays || 15;
+  const validityLabel = isOrder ? `Prazo: ${validityDaysValue} dias` : `Validade: ${validityDaysValue} dias`;
+  doc.setFontSize(8.5);
+  doc.setTextColor(...primaryOrange);
+  doc.text(validityLabel, 196, 37, { align: 'right' });
 
   // Client Info Box
   let y = 54;
@@ -417,9 +425,13 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
 
   // Observations Box (Left aligned)
   const obsWidth = 96;
-  const obsContent = (typeof data.observations === 'string' && data.observations.trim().length > 0)
+  let obsContent = (typeof data.observations === 'string' && data.observations.trim().length > 0)
     ? data.observations.trim()
-    : (company.defaultObservations || `• Orçamento válido por ${company.defaultValidityDays || 15} dias corridos.\n• Garantia de 90 dias sobre a mão de obra.`);
+    : (company.defaultObservations || `• Orçamento válido por ${data.validityDays || company.defaultValidityDays || 15} dias corridos.\n• Garantia de 90 dias sobre a mão de obra.`);
+
+  if (data.paymentMethod && !obsContent.toLowerCase().includes('forma de pagamento')) {
+    obsContent += `\n• Forma de Pagamento: ${data.paymentMethod}`;
+  }
 
   const splitObs = doc.splitTextToSize(obsContent, obsWidth - 8);
   const textHeight = Math.max(splitObs.length * 3.6 + 10, 26);

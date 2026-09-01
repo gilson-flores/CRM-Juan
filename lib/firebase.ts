@@ -60,7 +60,19 @@ export type CompanySettings = {
   warrantyTerms: string;
   allowRegistrations?: boolean;
   adminAuthKey?: string;
+  paymentMethods?: string[];
+  defaultPaymentMethod?: string;
 };
+
+export const DEFAULT_PAYMENT_METHODS: string[] = [
+  'PIX (À Vista)',
+  'Dinheiro (À Vista)',
+  'Cartão de Débito',
+  'Cartão de Crédito (em até 12x)',
+  '50% Entrada + 50% na Conclusão',
+  'Boleto Bancário',
+  'Transferência Bancária (TED)'
+];
 
 export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   companyName: 'JC ELETRICISTA',
@@ -78,7 +90,9 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   defaultObservations: '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra executada.\n• Materiais sob responsabilidade do cliente, salvo prévio acordo contratual.\n• Pagamento facilitado via PIX ou Cartão em até 12x.',
   warrantyTerms: 'Garantia legal de 90 dias em conformidade com o Código de Defesa do Consumidor para todos os serviços elétricos prestados.',
   allowRegistrations: true,
-  adminAuthKey: 'Davi'
+  adminAuthKey: 'Davi',
+  paymentMethods: DEFAULT_PAYMENT_METHODS,
+  defaultPaymentMethod: 'PIX (À Vista)'
 };
 
 // ================= AUTHENTICATION =================

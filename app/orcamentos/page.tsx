@@ -26,12 +26,14 @@ import {
   Filter,
   Layers,
   ArrowUpRight,
-  AlertTriangle
+  AlertTriangle,
+  CreditCard,
+  Calendar
 } from 'lucide-react';
 import type { Client } from '../clientes/page';
 import { useGoogleSheets, CatalogItem } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
-import { db, saveQuoteToFirestore, deleteQuoteFromFirestore } from '@/lib/firebase';
+import { db, saveQuoteToFirestore, deleteQuoteFromFirestore, DEFAULT_PAYMENT_METHODS } from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { getAssetUrl } from '@/lib/assetHelper';
@@ -65,6 +67,8 @@ export type FullDraft = {
   date: string;
   savedAt: string;
   status?: 'rascunho' | 'enviado' | 'pedido' | 'concluido';
+  paymentMethod?: string;
+  validityDays?: number | string;
 };
 
 export default function OrcamentosPage() {
@@ -82,6 +86,9 @@ export default function OrcamentosPage() {
     unitPrice: 0
   });
   const [discount, setDiscount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState('PIX (À Vista)');
+  const [validityDays, setValidityDays] = useState<number>(15);
+  const [registeredPaymentMethods, setRegisteredPaymentMethods] = useState<string[]>(DEFAULT_PAYMENT_METHODS);
   const [observations, setObservations] = useState(
     '• Orçamento válido por 15 dias corridos.\n• Garantia sobre os serviços executados.\n• Materiais por conta do contratante, salvo acordo prévio.'
   );
@@ -172,6 +179,15 @@ export default function OrcamentosPage() {
       if (savedSettings) {
         try {
           const parsedSettings = JSON.parse(savedSettings);
+          if (parsedSettings.paymentMethods && Array.isArray(parsedSettings.paymentMethods) && parsedSettings.paymentMethods.length > 0) {
+            setRegisteredPaymentMethods(parsedSettings.paymentMethods);
+          }
+          if (parsedSettings.defaultPaymentMethod) {
+            setPaymentMethod(parsedSettings.defaultPaymentMethod);
+          }
+          if (parsedSettings.defaultValidityDays) {
+            setValidityDays(Number(parsedSettings.defaultValidityDays) || 15);
+          }
           let defaultText = parsedSettings.defaultObservations || '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra.\n• Materiais por conta do contratante, salvo acordo prévio.';
           if (parsedSettings.pixKey && !defaultText.includes(parsedSettings.pixKey)) {
             defaultText += `\n• Chave PIX (${parsedSettings.pixType || 'Chave'}): ${parsedSettings.pixKey} [${parsedSettings.pixHolder || parsedSettings.ownerName || 'JC Eletricista'}]`;
@@ -324,6 +340,8 @@ export default function OrcamentosPage() {
       items,
       discount,
       observations,
+      paymentMethod,
+      validityDays,
       total,
       date: dateFormatted,
       savedAt: `${dateFormatted} às ${timeFormatted}`,
@@ -386,6 +404,8 @@ export default function OrcamentosPage() {
     setItems(draft.items || []);
     setDiscount(draft.discount || 0);
     setObservations(draft.observations || '');
+    if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+    if (draft.validityDays) setValidityDays(Number(draft.validityDays) || 15);
     setIsDraftsModalOpen(false);
     showNotification(`Rascunho de "${draft.clientName}" restaurado com sucesso!`);
     if (typeof window !== 'undefined') {
@@ -459,6 +479,8 @@ export default function OrcamentosPage() {
         discount: draft.discount || 0,
         total: draft.total,
         observations: draft.observations,
+        paymentMethod: draft.paymentMethod || paymentMethod,
+        validityDays: draft.validityDays || validityDays,
         companySettings,
         includeWarranty: includeWarranty,
         documentType: 'orcamento'
@@ -518,6 +540,8 @@ export default function OrcamentosPage() {
       discount,
       total,
       observations,
+      paymentMethod,
+      validityDays,
       companySettings,
       includeWarranty,
       documentType: 'orcamento'
@@ -532,7 +556,7 @@ export default function OrcamentosPage() {
     let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', paymentMethod, validityDays };
       updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
       quoteToSave = {
@@ -543,6 +567,8 @@ export default function OrcamentosPage() {
         items,
         discount,
         observations,
+        paymentMethod,
+        validityDays,
         total,
         date: dateFormatted,
         savedAt: `${dateFormatted} às ${timeFormatted}`,
@@ -568,7 +594,7 @@ export default function OrcamentosPage() {
     let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado' };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', paymentMethod, validityDays };
       updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
       quoteToSave = {
@@ -579,6 +605,8 @@ export default function OrcamentosPage() {
         items,
         discount,
         observations,
+        paymentMethod,
+        validityDays,
         total,
         date: dateFormatted,
         savedAt: `${dateFormatted} às ${timeFormatted}`,
@@ -676,7 +704,10 @@ export default function OrcamentosPage() {
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Cliente / Empresa</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Cliente / Empresa</label>
+                  <a href="/clientes" className="text-[10px] text-primary hover:underline font-bold">+ Novo Cliente</a>
+                </div>
                 <select 
                   className="w-full bg-surface-container-high border border-outline-variant rounded p-2.5 text-xs text-on-surface focus:outline-none focus:border-primary"
                   value={selectedClient}
@@ -831,6 +862,82 @@ export default function OrcamentosPage() {
             </div>
           </section>
 
+          {/* Condições Comerciais (Formas de Pagamento & Validade) */}
+          <section className="bg-[#0e0e11] rounded-2xl border border-[#202028] p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                <CreditCard className="text-[#FF7A00]" size={16} />
+                Condições Comerciais
+              </h2>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                Definido em Configurações
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Dropdown Forma de Pagamento */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 flex items-center gap-1.5">
+                  <CreditCard size={13} className="text-[#FF7A00]" />
+                  Forma de Pagamento
+                </label>
+                <div className="relative">
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="w-full bg-[#141418] border border-[#262630] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/30 transition-all font-medium appearance-none cursor-pointer"
+                  >
+                    {registeredPaymentMethods.map((method) => (
+                      <option key={method} value={method} className="bg-[#141418] text-white">
+                        {method}
+                      </option>
+                    ))}
+                    {!registeredPaymentMethods.includes(paymentMethod) && (
+                      <option value={paymentMethod} className="bg-[#141418] text-white">
+                        {paymentMethod}
+                      </option>
+                    )}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dropdown Prazo de Validade */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 flex items-center gap-1.5">
+                  <Calendar size={13} className="text-[#FF7A00]" />
+                  Prazo de Validade do Orçamento
+                </label>
+                <div className="relative">
+                  <select
+                    value={validityDays}
+                    onChange={(e) => setValidityDays(Number(e.target.value))}
+                    className="w-full bg-[#141418] border border-[#262630] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/30 transition-all font-medium appearance-none cursor-pointer"
+                  >
+                    <option value={5} className="bg-[#141418] text-white">5 dias corridos</option>
+                    <option value={7} className="bg-[#141418] text-white">7 dias corridos</option>
+                    <option value={10} className="bg-[#141418] text-white">10 dias corridos</option>
+                    <option value={15} className="bg-[#141418] text-white">15 dias corridos (Padrão)</option>
+                    <option value={20} className="bg-[#141418] text-white">20 dias corridos</option>
+                    <option value={30} className="bg-[#141418] text-white">30 dias corridos</option>
+                    <option value={45} className="bg-[#141418] text-white">45 dias corridos</option>
+                    <option value={60} className="bg-[#141418] text-white">60 dias corridos</option>
+                    <option value={90} className="bg-[#141418] text-white">90 dias corridos</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* Observations */}
           <section className="bg-[#0e0e11] rounded-2xl border border-[#202028] p-5 shadow-lg space-y-3">
             <div className="flex items-center justify-between">
@@ -970,6 +1077,7 @@ export default function OrcamentosPage() {
                       <span className="inline-block bg-gray-900 text-white font-black text-[9px] px-2 py-0.5 rounded uppercase">Orçamento</span>
                       <p className="text-[9px] text-gray-600 font-mono mt-1">Nº {quoteNumber}</p>
                       <p className="text-[8px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</p>
+                      <p className="text-[8px] text-amber-700 font-bold">Validade: {validityDays} dias</p>
                     </div>
                   </div>
 
@@ -1478,7 +1586,7 @@ export default function OrcamentosPage() {
                       </span>
                       <p className="text-xs text-gray-800 font-mono font-bold mt-1.5">Nº {quoteNumber}</p>
                       <p className="text-[9px] text-gray-500 mt-0.5">Emissão: {new Date().toLocaleDateString('pt-BR')}</p>
-                      <p className="text-[8px] text-amber-700 font-bold mt-0.5">Validade: 15 dias corridos</p>
+                      <p className="text-[8px] text-amber-700 font-bold mt-0.5">Validade: {validityDays} dias corridos</p>
                     </div>
                   </div>
 
