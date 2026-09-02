@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw, AlertTriangle, Search, Loader2, MapPin } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
-import { db } from '@/lib/firebase';
+import { db , sanitizeData } from '@/lib/firebase';
 import { collection, doc, deleteDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { Portal } from '@/components/ui/Portal';
@@ -125,7 +125,7 @@ export default function ClientesPage() {
             if (!exists) {
               list.push(localItem);
               // Push this missing item to Firestore in the background
-              setDoc(doc(db, 'clients', String(localItem.id)), localItem, { merge: true })
+              setDoc(doc(db, 'clients', String(localItem.id)), sanitizeData(localItem), { merge: true })
                 .catch((e: any) => console.warn('Auto-sync missing item to Firestore failed:', e));
             }
           });
@@ -184,7 +184,7 @@ export default function ClientesPage() {
       try {
         const updatedClient = updatedList.find(c => c.id === editingId);
         if (updatedClient) {
-          await setDoc(doc(db, 'clients', String(editingId)), updatedClient, { merge: true });
+          await setDoc(doc(db, 'clients', String(editingId)), sanitizeData(updatedClient), { merge: true });
         }
       } catch (err) {
         console.warn('Erro ao salvar cliente no Firestore:', err);
@@ -194,7 +194,7 @@ export default function ClientesPage() {
       const newClient = generateNewClient(formData);
       saveClients([newClient, ...clients]);
       try {
-        await setDoc(doc(db, 'clients', String(newClient.id)), newClient, { merge: true });
+        await setDoc(doc(db, 'clients', String(newClient.id)), sanitizeData(newClient), { merge: true });
       } catch (err) {
         console.warn('Erro ao salvar novo cliente no Firestore:', err);
       }
@@ -422,7 +422,7 @@ export default function ClientesPage() {
       {/* Modal Novo/Editar Cliente */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-surface border border-outline-variant rounded shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-surface border border-outline-variant rounded shadow-xl w-full xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-low shrink-0">
               <h2 className="text-lg font-bold text-on-surface">{editingId ? 'Editar Cliente' : 'Novo Cadastro de Cliente'}</h2>
               <button onClick={closeModal} className="text-on-surface-variant hover:text-primary transition-colors">
@@ -629,39 +629,37 @@ export default function ClientesPage() {
       <Portal>
       {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE CLIENTE */}
       {clientToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
-                <AlertTriangle size={20} />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#141418] border-t-4 border-t-red-600 border-x border-b border-[#292930] rounded-2xl w-[92vw] max-w-[400px] min-w-[300px] p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col gap-5">
+            <div className="flex flex-col items-center text-center gap-1">
+              <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 shrink-0 mb-2">
+                <AlertTriangle size={28} />
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Excluir Cliente</h3>
-                <p className="text-xs text-zinc-400 mt-0.5">Esta ação removerá o cliente permanentemente.</p>
+              <h3 className="text-base font-black text-white uppercase tracking-wider">Excluir Cliente</h3>
+              <p className="text-[11px] font-bold text-zinc-400">Esta ação é irreversível e removerá o registro permanentemente.</p>
+            </div>
+
+            <div className="bg-[#080808] p-4 rounded-xl border border-[#242429] text-xs space-y-2 w-full">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Nome:</span>
+                <span className="font-bold text-white text-sm truncate max-w-[220px]">{clientToDelete.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Documento:</span>
+                <span className="font-mono font-bold text-zinc-200 text-sm uppercase">{clientToDelete.type}: {clientToDelete.doc}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Telefone:</span>
+                <span className="font-mono font-bold text-zinc-300 text-sm">{clientToDelete.phone}</span>
               </div>
             </div>
 
-            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Nome:</span>
-                <span className="font-bold text-white truncate max-w-[220px]">{clientToDelete.name}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Documento:</span>
-                <span className="font-mono text-zinc-200 uppercase">{clientToDelete.type}: {clientToDelete.doc}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Telefone:</span>
-                <span className="text-zinc-300">{clientToDelete.phone}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+            <div className="flex items-center gap-3 pt-2 w-full">
               <button
                 type="button"
                 onClick={() => setClientToDelete(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 border border-[#2c2c35]"
               >
                 Cancelar
               </button>
@@ -669,32 +667,17 @@ export default function ClientesPage() {
                 type="button"
                 onClick={handleConfirmDeleteClient}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
               >
-                <Trash2 size={13} />
-                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+                <Trash2 size={15} />
+                {isDeleting ? "Excluindo..." : "Excluir Definitivamente"}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* TOAST DE NOTIFICAÇÃO */}
-      {notification && (
-        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-5 duration-200 border ${
-          notification.type === 'error' 
-            ? 'bg-red-950/90 text-red-200 border-red-800 backdrop-blur-md'
-            : notification.type === 'info'
-            ? 'bg-[#181820]/95 text-zinc-200 border-[#2e2e3a] backdrop-blur-md'
-            : 'bg-emerald-950/90 text-emerald-200 border-emerald-800 backdrop-blur-md'
-        }`}>
-          <span>{notification.text}</span>
-          <button onClick={() => setNotification(null)} className="ml-2 text-zinc-400 hover:text-white p-0.5">
-            <X size={14} />
-          </button>
-        </div>
-      )}
       </Portal>
+
     </>
   );
 }

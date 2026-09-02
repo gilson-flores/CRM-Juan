@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, FileText, Settings, Menu, User, X, Wrench, CheckSquare, LogIn, AlertCircle, Lock } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Settings, Menu, User, X, CheckSquare, LogIn, AlertCircle, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { useFirebaseData } from '@/hooks/useFirebaseData';
 import { AdminDiagnosticBar } from '@/components/AdminDiagnosticBar';
@@ -34,7 +34,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { name: 'Clientes', href: '/clientes', icon: Users },
     { name: 'Orçamentos', href: '/orcamentos', icon: FileText },
     { name: 'Ordens de Serviço', href: '/pedidos', icon: CheckSquare },
-    { name: 'Catálogo', href: '/catalogo', icon: Wrench },
     { name: 'Configurações', href: '/configuracoes', icon: Settings },
   ];
 
@@ -221,8 +220,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Sidebar Footer info */}
-        
-        <div className="p-4 border-t border-[#1a1a1e] bg-[#070707]">
+        <div className="p-4 border-t border-[#1a1a1e] bg-[#070707] flex flex-col gap-3">
+          <button
+            onClick={() => logout()}
+            className="w-full flex items-center justify-center gap-2 text-xs font-bold text-zinc-400 hover:text-red-400 bg-[#141418] hover:bg-[#1f1a1d] border border-[#222228] px-3 py-2 rounded-lg transition-colors cursor-pointer"
+            title="Encerrar Sessão"
+          >
+            <LogIn size={16} className="rotate-180" /> Sair
+          </button>
           <div className="flex items-center justify-between text-[11px] text-zinc-400">
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#FF7A00] animate-pulse"></span>
@@ -256,9 +261,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 <span className="text-xs font-bold text-white leading-tight truncate max-w-[200px] sm:max-w-[320px]">
                   {user.displayName || companySettings?.ownerName || (user.email ? user.email.split('@')[0] : 'Usuário')}
                 </span>
-                <span className="text-[10px] text-zinc-400 truncate max-w-[200px] sm:max-w-[320px]">
-                  {user.email}
-                </span>
               </div>
             </div>
           </div>
@@ -271,13 +273,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
             >
               <Settings size={19} />
             </Link>
-            <button
-              onClick={() => logout()}
-              className="text-xs font-bold text-zinc-400 hover:text-red-400 bg-[#141418] hover:bg-[#1f1a1d] border border-[#222228] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-              title="Encerrar Sessão"
-            >
-              Sair
-            </button>
           </div>
         </header>
 

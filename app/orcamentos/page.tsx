@@ -37,6 +37,7 @@ import {
   db, 
   saveQuoteToFirestore, 
   deleteQuoteFromFirestore, 
+  saveCatalogItemToFirestore,
   DEFAULT_PAYMENT_METHODS, 
   DEFAULT_COMPANY_SETTINGS, 
   buildBudgetObservations, 
@@ -340,6 +341,39 @@ export default function OrcamentosPage() {
   const subtotal = items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
   const total = Math.max(0, subtotal - discount);
 
+  const autoSaveItemsToCatalog = () => {
+    if (items.length === 0) return;
+    
+    let isModified = false;
+    let updatedCatalog = [...catalogItems];
+    
+    items.forEach(item => {
+      if (!item.description.trim()) return;
+      
+      // check if it exists (case insensitive match on description)
+      const existing = updatedCatalog.find(c => c.name.toLowerCase() === item.description.trim().toLowerCase());
+      if (!existing) {
+        const newItem: CatalogItem = {
+          id: `CAT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+          name: item.description.trim(),
+          description: '',
+          category: 'Serviços/Materiais',
+          unitPrice: item.unitPrice,
+          unit: 'un',
+          createdAt: new Date().toISOString()
+        };
+        updatedCatalog.push(newItem);
+        isModified = true;
+        saveCatalogItemToFirestore(newItem).catch(() => {});
+      }
+    });
+
+    if (isModified) {
+      setCatalogItems(updatedCatalog);
+      localStorage.setItem('@jc-eletricista:catalog_v2', JSON.stringify(updatedCatalog));
+    }
+  };
+
   // 1. SALVAR RASCUNHO & SINCRONIZAR COM ABA ITENS DO GOOGLE SHEETS
   const handleSaveDraft = async () => {
     if (!selectedClient && items.length === 0) {
@@ -405,6 +439,8 @@ export default function OrcamentosPage() {
     if (isConnected) {
       syncAllData().catch(err => console.warn('Failed to sync to sheets:', err));
     }
+
+    autoSaveItemsToCatalog();
 
     setIsSyncing(false);
     showNotification('Rascunho e itens salvos com sucesso!');
@@ -599,6 +635,8 @@ export default function OrcamentosPage() {
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
     saveQuoteToFirestore(quoteToSave).catch(e => console.warn('Firestore save quote:', e));
 
+    autoSaveItemsToCatalog();
+
     showNotification('PDF gerado com sucesso! Arquivo pronto para impressão ou WhatsApp.');
   };
 
@@ -636,6 +674,8 @@ export default function OrcamentosPage() {
     setSavedDrafts(updatedDrafts);
     localStorage.setItem('@jc-eletricista:saved_drafts_v2', JSON.stringify(updatedDrafts));
     saveQuoteToFirestore(quoteToSave).catch(e => console.warn('Firestore save quote:', e));
+    
+    autoSaveItemsToCatalog();
     
     window.print();
   };
@@ -709,11 +749,8 @@ export default function OrcamentosPage() {
         </div>
       </header>
 
-      {/* Editor & Preview Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        
-        {/* Form Editor (Left Column) */}
-        <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
+      {/* Form Editor */}
+      <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full">
 
           {/* Client Details Card */}
           <section className="bg-surface-container rounded border border-outline-variant p-5">
@@ -805,17 +842,24 @@ export default function OrcamentosPage() {
                   {/* New Item Input Row */}
                   <tr className="bg-surface-container-highest/50">
                     <td className="p-2 text-[10px] text-zinc-500 text-center font-bold font-mono">NOVO</td>
-                    <td className="p-2">
+                    <td className="p-2 relative flex items-center">
                       <input 
                         type="text" 
-                        placeholder="Digite o serviço ou clique em 'Tabela de Serviços'..." 
-                        className="w-full bg-surface-container-high border border-outline-variant focus:border-primary rounded px-3 py-2 text-on-surface text-xs outline-none"
+                        placeholder="Digite o serviço..." 
+                        className="w-full bg-surface-container-high border border-outline-variant focus:border-primary rounded pl-3 pr-10 py-2 text-on-surface text-xs outline-none"
                         value={newItem.description}
                         onChange={(e) => setNewItem({...newItem, description: e.target.value})}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') handleAddItem();
                         }}
                       />
+                      <button 
+                        onClick={() => setIsCatalogModalOpen(true)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#FF7A00] transition-colors p-1"
+                        title="Buscar em itens salvos"
+                      >
+                        <Search size={16} />
+                      </button>
                     </td>
                     <td className="p-2">
                       <input 
@@ -1010,226 +1054,6 @@ export default function OrcamentosPage() {
               <div className="w-11 h-6 bg-[#202028] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FF7A00]"></div>
             </label>
           </section>
-        </div>
-
-        {/* Live Preview (Right Column) */}
-        <div className="lg:col-span-5 xl:col-span-4 sticky top-6">
-          <div className="bg-surface-container rounded border border-outline-variant overflow-hidden flex flex-col shadow-2xl shadow-black/60">
-            {/* Preview Header */}
-            <div className="bg-surface-container-highest p-3 border-b border-outline-variant flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-1 bg-[#141418] p-1 rounded-lg border border-[#27272e]">
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab('orcamento')}
-                  className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
-                    previewTab === 'orcamento'
-                      ? 'bg-[#FF7A00] text-black shadow-sm'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  Pág 1: Orçamento
-                </button>
-                {includeWarranty ? (
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTab('garantia')}
-                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
-                      previewTab === 'garantia'
-                        ? 'bg-[#FF7A00] text-black shadow-sm'
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Pág 2: Termos de Garantia
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIncludeWarranty(true);
-                      setPreviewTab('garantia');
-                    }}
-                    title="Clique para ativar e visualizar os termos de garantia"
-                    className="px-2.5 py-1 rounded text-[10px] font-medium text-zinc-500 hover:text-zinc-300 transition-all border border-dashed border-zinc-700/50"
-                  >
-                    + Ativar Pág 2
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePrintScreen}
-                  title="Imprimir tela"
-                  className="p-1 text-zinc-400 hover:text-white transition-colors"
-                >
-                  <Printer size={15} />
-                </button>
-                <span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-primary/20">
-                  {includeWarranty 
-                    ? (previewTab === 'orcamento' ? '1/2 Timbrado' : '2/2 Garantia')
-                    : '1/1 Orçamento'}
-                </span>
-              </div>
-            </div>
-            
-            {/* "Paper" Area */}
-            <div className="p-5 bg-white text-gray-900 m-3 rounded-lg shadow-inner border border-gray-300 text-[11px] leading-tight select-none min-h-[480px] flex flex-col justify-between">
-              
-              {previewTab === 'orcamento' ? (
-                <div>
-                  {/* Header Box */}
-                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
-                    <div className="flex items-center gap-3">
-                      <img 
-                        src={getAssetUrl('/logo.svg')} 
-                        alt="Logo JC Eletricista" 
-                        className="w-12 h-12 rounded-lg object-contain shrink-0 shadow-sm border border-[#26262e] bg-[#0c0c0f]" 
-                      />
-                      <div>
-                        <h1 className="text-sm font-black uppercase text-gray-900 tracking-tight">JC ELETRICISTA</h1>
-                        <p className="text-[9px] text-[#ea580c] font-bold">Serviços Elétricos Profissionais</p>
-                        <p className="text-[8px] text-gray-500">Residencial • Comercial • Padrão</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="inline-block bg-gray-900 text-white font-black text-[9px] px-2 py-0.5 rounded uppercase">Orçamento</span>
-                      <p className="text-[9px] text-gray-600 font-mono mt-1">Nº {quoteNumber}</p>
-                      <p className="text-[8px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</p>
-                      <p className="text-[8px] text-amber-700 font-bold">Validade: {validityDays} dias</p>
-                    </div>
-                  </div>
-
-                  {/* Client Info */}
-                  <div className="bg-gray-50 p-2.5 rounded border border-gray-200 mb-3">
-                    <p className="text-[8px] font-bold uppercase text-gray-400">Cliente / Local:</p>
-                    <p className="text-xs font-bold text-gray-900">{selectedClient || 'Nome do Cliente'}</p>
-                    <p className="text-[9px] text-gray-600 truncate">{address || 'Endereço da Obra'}</p>
-                  </div>
-
-                  {/* Items Table */}
-                  <table className="w-full text-[9px] text-left mb-3">
-                    <thead className="border-b border-gray-300 text-gray-500 uppercase">
-                      <tr>
-                        <th className="py-1">Item</th>
-                        <th className="py-1 text-center">Qtd</th>
-                        <th className="py-1 text-right">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-gray-800 divide-y divide-gray-100">
-                      {items.length > 0 ? items.map((item, idx) => (
-                        <tr key={item.id}>
-                          <td className="py-1 pr-1 font-medium">{idx + 1}. {item.description}</td>
-                          <td className="py-1 text-center font-mono">{item.quantity}</td>
-                          <td className="py-1 text-right font-mono font-semibold">R$ {formatCurrency(item.quantity * item.unitPrice)}</td>
-                        </tr>
-                      )) : (
-                        <tr><td colSpan={3} className="py-3 text-center text-gray-400 italic">Nenhum item adicionado.</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-
-                  {/* Totals */}
-                  <div className="flex justify-end border-t border-gray-300 pt-2 mb-3">
-                    <div className="w-40 text-right space-y-1">
-                      <div className="flex justify-between text-[9px] text-gray-600">
-                        <span>Subtotal:</span>
-                        <span>R$ {formatCurrency(subtotal)}</span>
-                      </div>
-                      {discount > 0 && (
-                        <div className="flex justify-between text-[9px] text-red-600">
-                          <span>Desconto:</span>
-                          <span>- R$ {formatCurrency(discount)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-xs font-black text-gray-900 border-t border-gray-200 pt-1">
-                        <span>Total:</span>
-                        <span className="text-[#ea580c]">R$ {formatCurrency(total)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Observations & Terms */}
-                  {computedObservations && (
-                    <div className="mb-3 pt-2 border-t border-gray-200 text-[8px] text-gray-600 leading-tight">
-                      <p className="font-bold uppercase text-gray-400 mb-0.5">Observações & Condições:</p>
-                      <p className="whitespace-pre-line">{computedObservations}</p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  {/* Header Box Garantia */}
-                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-lg bg-black border border-[#FF7A00]/40 flex flex-col items-center justify-center p-1 shrink-0 shadow-sm text-center">
-                        <span className="font-black italic text-base leading-none text-[#FF7A00]">JC</span>
-                        <span className="text-[5px] font-black text-white uppercase tracking-wider mt-0.5">ELETRICISTA</span>
-                        <span className="text-[4px] text-[#FF7A00] leading-none">residencial/comercial</span>
-                      </div>
-                      <div>
-                        <h1 className="text-sm font-black uppercase text-gray-900 tracking-tight">TERMO DE GARANTIA</h1>
-                        <p className="text-[9px] text-[#ea580c] font-bold">ABNT NBR 5410 & NR-10</p>
-                        <p className="text-[8px] text-gray-500">47 99706-4183 • jc_eletricistajoinville</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="inline-block bg-[#ea580c] text-white font-black text-[8px] px-2 py-0.5 rounded uppercase">Certificado</span>
-                      <p className="text-[9px] text-gray-600 font-mono mt-1">Ref: {quoteNumber}</p>
-                      <p className="text-[8px] text-gray-500">Pág 2 de 2</p>
-                    </div>
-                  </div>
-
-                  {/* Client Info */}
-                  <div className="bg-gray-50 p-2 rounded border border-gray-200 mb-2.5 text-[8px]">
-                    <span className="font-bold text-gray-700">Contratante:</span> <span className="text-gray-900 font-semibold">{selectedClient || 'Cliente'}</span>
-                    <span className="mx-2 text-gray-300">•</span>
-                    <span className="font-bold text-gray-700">Local:</span> <span className="text-gray-600">{address || 'Conforme orçamento'}</span>
-                  </div>
-
-                  {/* Clauses List */}
-                  <div className="space-y-2 text-[8px] text-gray-700 leading-snug border border-gray-200 rounded p-2.5 bg-gray-50/50 mb-3">
-                    <div>
-                      <p className="font-bold text-[#ea580c]">1. PRAZO E COBERTURA LEGAL</p>
-                      <p className="text-gray-600">Garantia legal de 90 (noventa) dias sobre a mão de obra especializada conforme Art. 26 do CDC.</p>
-                    </div>
-                    <div>
-                      <p className="font-bold text-[#ea580c]">2. NORMAS TÉCNICAS APLICADAS</p>
-                      <p className="text-gray-600">Execução rigorosa em conformidade com as normas ABNT NBR 5410 e NR-10 de segurança.</p>
-                    </div>
-                    <div>
-                      <p className="font-bold text-[#ea580c]">3. CONDIÇÕES PARA VALIDADE</p>
-                      <p className="text-gray-600">Utilização de materiais certificados INMETRO e respeito ao dimensionamento dos disjuntores e condutores.</p>
-                    </div>
-                    <div>
-                      <p className="font-bold text-[#ea580c]">4. EXCLUSÕES DE COBERTURA</p>
-                      <p className="text-gray-600">Intervenções de terceiros não autorizados, sobrecargas não previstas e descargas atmosféricas sem DPS.</p>
-                    </div>
-                    <div>
-                      <p className="font-bold text-[#ea580c]">5. SUPORTE TÉCNICO</p>
-                      <p className="text-gray-600">Acionamento imediato via WhatsApp oficial (47 99706-4183) para vistoria e assistência prioritária.</p>
-                    </div>
-                  </div>
-
-                  {/* Signatures preview */}
-                  <div className="pt-2 border-t border-gray-200 flex justify-between text-[7px] text-gray-500 text-center">
-                    <div className="w-28 border-t border-gray-400 pt-1">JC ELETRICISTA</div>
-                    <div className="w-28 border-t border-gray-400 pt-1">Cliente / Aceite</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Preview CTA */}
-              <button
-                type="button"
-                onClick={() => setIsPreviewModalOpen(true)}
-                className="w-full bg-[#FF7A00] hover:bg-[#FF8A00] text-black py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#FF7A00]/20 active:scale-[0.98] mt-3"
-              >
-                <Eye size={15} />
-                Pré-visualizar Orçamento
-              </button>
-            </div>
-          </div>
-        </div>
 
       </div>
 
@@ -1237,7 +1061,7 @@ export default function OrcamentosPage() {
       {/* MODAL: RESTAURAR RASCUNHO / HISTÓRICO DE ORÇAMENTOS */}
       {isDraftsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]">
+          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[85vh]">
             <div className="flex justify-between items-center p-5 border-b border-[#242429]">
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 <History size={18} className="text-[#FF7A00]" />
@@ -1291,7 +1115,7 @@ export default function OrcamentosPage() {
                 </button>
               </div>
 
-              <div className="relative flex-1 max-w-xs">
+              <div className="relative flex-1 s">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                 <input
                   type="text"
@@ -1417,14 +1241,14 @@ export default function OrcamentosPage() {
         </div>
       )}
 
-      {/* MODAL: SELECIONAR DO CATÁLOGO DE SERVIÇOS */}
+      {/* MODAL: SELECIONAR DE ITENS SALVOS */}
       {isCatalogModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
             <div className="flex justify-between items-center p-5 border-b border-[#242429]">
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 <BookOpen size={18} className="text-[#FF7A00]" />
-                <span>Tabela de Serviços & Materiais Cadastrados</span>
+                <span>Serviços e Materiais Salvos</span>
               </div>
               <button
                 onClick={() => setIsCatalogModalOpen(false)}
@@ -1487,7 +1311,7 @@ export default function OrcamentosPage() {
 
             <div className="p-4 bg-[#0e0e11] border-t border-[#242429] flex justify-between items-center">
               <span className="text-[11px] text-zinc-500">
-                Dica: Você pode cadastrar novos itens na aba <strong>Configurações</strong>.
+                Os itens são salvos automaticamente ao concluir um orçamento.
               </span>
               <button
                 type="button"
@@ -1689,10 +1513,10 @@ export default function OrcamentosPage() {
                   </div>
 
                   {/* Observações e Condições */}
-                  {observations && (
+                  {computedObservations && (
                     <div className="bg-amber-50/60 border border-amber-200/80 rounded-lg p-3 text-[9px] text-gray-700 mb-4 leading-relaxed">
                       <p className="font-bold uppercase text-amber-900 mb-1">Observações & Condições Gerais:</p>
-                      <p className="whitespace-pre-line text-gray-800">{observations}</p>
+                      <p className="whitespace-pre-line text-gray-800">{computedObservations}</p>
                     </div>
                   )}
 
@@ -1852,39 +1676,37 @@ export default function OrcamentosPage() {
 
       {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ORÇAMENTO */}
       {quoteToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
-                <AlertTriangle size={20} />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#141418] border-t-4 border-t-red-600 border-x border-b border-[#292930] rounded-2xl w-[92vw] max-w-[400px] min-w-[300px] p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col gap-5">
+            <div className="flex flex-col items-center text-center gap-1">
+              <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 shrink-0 mb-2">
+                <AlertTriangle size={28} />
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Excluir Orçamento</h3>
-                <p className="text-xs text-zinc-400 mt-0.5">Esta ação não poderá ser desfeita.</p>
-              </div>
+              <h3 className="text-base font-black text-white uppercase tracking-wider">Excluir Orçamento</h3>
+              <p className="text-[11px] font-bold text-zinc-400">Esta ação é irreversível e removerá o registro permanentemente.</p>
             </div>
 
-            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+            <div className="bg-[#080808] p-4 rounded-xl border border-[#242429] text-xs space-y-2 w-full">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Número:</span>
-                <span className="font-mono font-bold text-white">#{quoteToDelete.quoteNumber}</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Número:</span>
+                <span className="font-mono font-bold text-white text-sm">#{quoteToDelete.quoteNumber}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Cliente:</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Cliente:</span>
                 <span className="font-bold text-zinc-200 truncate max-w-[200px]">{quoteToDelete.clientName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Valor Total:</span>
-                <span className="font-mono font-bold text-[#FF7A00]">R$ {formatCurrency(quoteToDelete.total)}</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Valor Total:</span>
+                <span className="font-mono font-bold text-[#FF7A00] text-sm">R$ {formatCurrency(quoteToDelete.total)}</span>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+            <div className="flex items-center gap-3 pt-2 w-full">
               <button
                 type="button"
                 onClick={() => setQuoteToDelete(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 border border-[#2c2c35]"
               >
                 Cancelar
               </button>
@@ -1892,16 +1714,17 @@ export default function OrcamentosPage() {
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
               >
-                <Trash2 size={13} />
-                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+                <Trash2 size={15} />
+                {isDeleting ? "Excluindo..." : "Excluir Definitivamente"}
               </button>
             </div>
           </div>
         </div>
       )}
       </Portal>
+
     </>
   );
 }

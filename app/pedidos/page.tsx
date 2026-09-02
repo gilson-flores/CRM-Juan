@@ -19,7 +19,7 @@ import {
   MapPin, 
   Loader2, 
   Wrench, 
-  User, 
+  User, BookOpen, 
   RotateCcw 
 } from 'lucide-react';
 import type { FullDraft, QuoteItem } from '../orcamentos/page';
@@ -34,7 +34,7 @@ import {
   DEFAULT_COMPANY_SETTINGS,
   buildBudgetObservations,
   type CompanySettings
-} from '@/lib/firebase';
+, sanitizeData } from '@/lib/firebase';
 import { collection, onSnapshot, setDoc, doc } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { Portal } from '@/components/ui/Portal';
@@ -67,6 +67,19 @@ export default function PedidosPage() {
       isOrder: true
     });
   }, [directPaymentMethod, companySettings]);
+
+  const [newDirectItem, setNewDirectItem] = useState<QuoteItem>({ id: "", description: "", quantity: 1, unitPrice: 0 });
+  const [isCatalogModalOpen, setIsCatalogModalOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+
+  const filteredCatalog = useMemo(() => {
+    return catalogItems.filter(item => 
+      !catalogSearch || 
+      item.name.toLowerCase().includes(catalogSearch.toLowerCase()) || 
+      (item.description || "").toLowerCase().includes(catalogSearch.toLowerCase()) ||
+      item.category.toLowerCase().includes(catalogSearch.toLowerCase())
+    );
+  }, [catalogItems, catalogSearch]);
 
   // Itens da O.S. Direta
   const [directItems, setDirectItems] = useState<QuoteItem[]>([
@@ -252,11 +265,28 @@ export default function PedidosPage() {
 
   // Gerenciamento de itens da O.S. Direta
   const handleAddDirectItem = () => {
+    if (newDirectItem.description.trim() && newDirectItem.quantity > 0) {
+      const generatedId = `item-${Date.now()}`;
+      setDirectItems(prev => [...prev, { ...newDirectItem, id: generatedId }]);
+      setNewDirectItem({ id: "", description: "", quantity: 1, unitPrice: 0 });
+    }
+  };
+
+  const handleSelectFromCatalogForDirect = (catalogItem: CatalogItem) => {
+    const generatedId = `item-${Date.now()}`;
     setDirectItems(prev => [
       ...prev,
-      { id: `item-${Date.now()}`, description: '', quantity: 1, unitPrice: 0 }
+      {
+        id: generatedId,
+        description: catalogItem.name + (catalogItem.description ? ` (${catalogItem.description})` : ""),
+        quantity: 1,
+        unitPrice: catalogItem.unitPrice,
+        catalogId: catalogItem.id
+      }
     ]);
+    setIsCatalogModalOpen(false);
   };
+
 
   const handleRemoveDirectItem = (index: number) => {
     if (directItems.length <= 1) {
@@ -359,7 +389,7 @@ export default function PedidosPage() {
       setClients(updatedClients);
       localStorage.setItem('@jc-eletricista:clients', JSON.stringify(updatedClients));
       try {
-        await setDoc(doc(db, 'clients', String(newClientObj.id)), newClientObj, { merge: true });
+        await setDoc(doc(db, 'clients', String(newClientObj.id)), sanitizeData(newClientObj), { merge: true });
       } catch (err) {
         console.warn('Erro ao salvar cliente no Firestore:', err);
       }
@@ -831,6 +861,16 @@ export default function PedidosPage() {
                       </div>
 
                       <div className="flex items-center gap-2.5 w-full md:w-auto">
+                        <a
+                          href="https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional%2fNotas%2fEmitidas"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 md:flex-initial min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-700 border border-blue-500/50 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                          title="Emitir Nota Fiscal (Portal Nacional)"
+                        >
+                          <FileText size={15} />
+                          <span>Emitir Nota</span>
+                        </a>
                         <button
                           onClick={() => handleGenerateOrderPdf(order)}
                           className="flex-1 md:flex-initial min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-[#1c1c22] hover:bg-[#282830] border border-[#353540] flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
@@ -1053,95 +1093,115 @@ export default function PedidosPage() {
 
               {/* Tabela de Itens / Serviços */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <FileText size={13} className="text-[#FF7A00]" /> Serviços &amp; Materiais
+                    <FileText size={13} className="text-[#FF7A00]" /> Itens da O.S. ({directItems.length})
                   </span>
                   <button
                     type="button"
-                    onClick={handleAddDirectItem}
-                    className="text-[#FF7A00] hover:text-[#FFA845] text-xs font-bold flex items-center gap-1 transition-colors"
+                    onClick={() => setIsCatalogModalOpen(true)}
+                    className="self-start sm:self-auto bg-[#18181c] hover:bg-[#242429] border border-[#FF7A00]/40 text-[#FF7A00] text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
                   >
-                    <PlusCircle size={14} /> + Adicionar Linha
+                    <BookOpen size={14} />
+                    Tabela de Serviços Cadastrados
                   </button>
                 </div>
 
-                <div className="space-y-2.5">
-                  {directItems.map((item, index) => (
-                    <div key={item.id || index} className="p-3 bg-[#0a0a0d] border border-[#24242e] rounded-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-                      {/* Seletor Rápido do Catálogo */}
-                      {catalogItems.length > 0 && (
-                        <div className="sm:w-36 shrink-0">
-                          <select
-                            onChange={(e) => handleSelectCatalogItemForDirect(index, e.target.value)}
-                            value={item.catalogId || ''}
-                            className="w-full bg-[#141418] border border-[#27272a] rounded-lg p-2 text-[11px] text-zinc-300 focus:outline-none focus:border-[#FF7A00]"
+                <div className="bg-[#0a0a0d] rounded-xl border border-[#24242e] overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[620px]">
+                    <thead>
+                      <tr className="bg-[#141418] border-b border-[#24242e] text-zinc-400 text-[11px] font-semibold uppercase tracking-wider">
+                        <th className="p-3 w-16">ID</th>
+                        <th className="p-3">Descrição do Serviço / Material</th>
+                        <th className="p-3 w-20 text-center">Qtd</th>
+                        <th className="p-3 w-28 text-right">V. Unitário</th>
+                        <th className="p-3 w-28 text-right">Total</th>
+                        <th className="p-3 w-10 text-center">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#24242e]">
+                      {directItems.map((item, index) => (
+                        <tr key={item.id} className="hover:bg-[#141418] transition-colors group">
+                          <td className="p-3 font-mono text-[10px] text-zinc-500 font-bold">{item.id || index + 1}</td>
+                          <td className="p-3 text-xs text-white font-medium">{item.description}</td>
+                          <td className="p-3 text-xs text-white text-center font-mono">{item.quantity}</td>
+                          <td className="p-3 text-xs text-white text-right font-mono">R$ {formatCurrency(item.unitPrice)}</td>
+                          <td className="p-3 text-xs text-[#FF7A00] font-bold text-right font-mono">R$ {formatCurrency((item.quantity || 1) * (item.unitPrice || 0))}</td>
+                          <td className="p-3 text-center">
+                            <button 
+                              onClick={() => handleRemoveDirectItem(index)} 
+                              className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                              title="Remover Item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      
+                      {/* New Item Input Row */}
+                      <tr className="bg-[#141418]/50">
+                        <td className="p-2 text-[10px] text-zinc-500 text-center font-bold font-mono">NOVO</td>
+                        <td className="p-2 relative flex items-center">
+                          <input 
+                            type="text" 
+                            placeholder="Digite o serviço..." 
+                            className="w-full bg-[#0a0a0d] border border-[#27272a] focus:border-[#FF7A00] rounded-lg pl-3 pr-10 py-2 text-white text-xs outline-none"
+                            value={newDirectItem.description}
+                            onChange={(e) => setNewDirectItem({...newDirectItem, description: e.target.value})}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleAddDirectItem();
+                            }}
+                          />
+                          <button 
+                            onClick={() => setIsCatalogModalOpen(true)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#FF7A00] transition-colors p-1"
+                            title="Buscar em itens salvos"
                           >
-                            <option value="">Catálogo...</option>
-                            {catalogItems.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      {/* Descrição */}
-                      <input
-                        type="text"
-                        required
-                        placeholder="Descrição do serviço ou material"
-                        value={item.description}
-                        onChange={(e) => handleUpdateDirectItem(index, 'description', e.target.value)}
-                        className="flex-1 bg-[#141418] border border-[#27272a] rounded-lg p-2 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
-                      />
-
-                      {/* Quantidade */}
-                      <div className="w-20 sm:w-20 shrink-0 flex items-center gap-1">
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          required
-                          placeholder="Qtd"
-                          value={item.quantity}
-                          onChange={(e) => handleUpdateDirectItem(index, 'quantity', Number(e.target.value) || 1)}
-                          className="w-full bg-[#141418] border border-[#27272a] rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-[#FF7A00] font-mono"
-                        />
-                      </div>
-
-                      {/* Preço Unitário */}
-                      <div className="w-28 sm:w-28 shrink-0">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          required
-                          placeholder="V. Unit (R$)"
-                          value={item.unitPrice || ''}
-                          onChange={(e) => handleUpdateDirectItem(index, 'unitPrice', Number(e.target.value) || 0)}
-                          className="w-full bg-[#141418] border border-[#27272a] rounded-lg p-2 text-xs text-right text-white focus:outline-none focus:border-[#FF7A00] font-mono"
-                        />
-                      </div>
-
-                      {/* Total da Linha */}
-                      <div className="w-24 text-right font-mono font-bold text-zinc-200 text-xs shrink-0 self-center">
-                        R$ {formatCurrency((item.quantity || 0) * (item.unitPrice || 0))}
-                      </div>
-
-                      {/* Botão Remover Linha */}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveDirectItem(index)}
-                        className="text-zinc-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-[#1a1a22] transition-colors self-center shrink-0"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
+                            <Search size={16} />
+                          </button>
+                        </td>
+                        <td className="p-2">
+                          <input 
+                            type="number" 
+                            min="1"
+                            className="w-full bg-[#0a0a0d] border border-[#27272a] focus:border-[#FF7A00] rounded-lg px-2 py-2 text-white text-xs outline-none text-center font-mono"
+                            value={newDirectItem.quantity}
+                            onChange={(e) => setNewDirectItem({...newDirectItem, quantity: Number(e.target.value) || 1})}
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            className="w-full bg-[#0a0a0d] border border-[#27272a] focus:border-[#FF7A00] rounded-lg px-2 py-2 text-white text-xs outline-none text-right font-mono"
+                            value={newDirectItem.unitPrice || ""}
+                            onChange={(e) => setNewDirectItem({...newDirectItem, unitPrice: Number(e.target.value) || 0})}
+                          />
+                        </td>
+                        <td className="p-2 text-right text-xs font-bold text-zinc-400 font-mono px-3 py-2">
+                          R$ {formatCurrency((newDirectItem.quantity || 1) * (newDirectItem.unitPrice || 0))}
+                        </td>
+                        <td className="p-2 text-center">
+                          <button 
+                            onClick={handleAddDirectItem} 
+                            disabled={!newDirectItem.description.trim()} 
+                            className="text-[#FF7A00] hover:text-[#FFA845] transition-colors disabled:opacity-30 p-1"
+                            title="Adicionar Item"
+                          >
+                            <PlusCircle size={22} />
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
               {/* Condições, Pagamento e Totais */}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[#202026]">
                 <div className="space-y-3">
                   <div>
@@ -1233,39 +1293,37 @@ export default function PedidosPage() {
 
       {/* MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE ORDEM DE SERVIÇO */}
       {orderToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[#141418] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/25 flex items-center justify-center text-red-400 shrink-0">
-                <AlertTriangle size={20} />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#141418] border-t-4 border-t-red-600 border-x border-b border-[#292930] rounded-2xl w-[92vw] max-w-[400px] min-w-[300px] p-6 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col gap-5">
+            <div className="flex flex-col items-center text-center gap-1">
+              <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 shrink-0 mb-2">
+                <AlertTriangle size={28} />
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Excluir Ordem de Serviço</h3>
-                <p className="text-xs text-zinc-400 mt-0.5">Esta ação removerá a O.S. permanentemente.</p>
-              </div>
+              <h3 className="text-base font-black text-white uppercase tracking-wider">Excluir Ordem de Serviço</h3>
+              <p className="text-[11px] font-bold text-zinc-400">Esta ação é irreversível e removerá o registro permanentemente.</p>
             </div>
 
-            <div className="bg-[#0e0e11] p-3.5 rounded-xl border border-[#242429] text-xs space-y-1.5">
+            <div className="bg-[#080808] p-4 rounded-xl border border-[#242429] text-xs space-y-2 w-full">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Número da O.S.:</span>
-                <span className="font-mono font-bold text-white">#{orderToDelete.quoteNumber}</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Número da O.S.:</span>
+                <span className="font-mono font-bold text-white text-sm">#{orderToDelete.quoteNumber}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Cliente:</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Cliente:</span>
                 <span className="font-bold text-zinc-200 truncate max-w-[200px]">{orderToDelete.clientName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Valor Total:</span>
-                <span className="font-mono font-bold text-[#FF7A00]">R$ {formatCurrency(orderToDelete.total)}</span>
+                <span className="text-zinc-500 font-bold uppercase tracking-wider text-[10px]">Valor Total:</span>
+                <span className="font-mono font-bold text-[#FF7A00] text-sm">R$ {formatCurrency(orderToDelete.total)}</span>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#222228]">
+            <div className="flex items-center gap-3 pt-2 w-full">
               <button
                 type="button"
                 onClick={() => setOrderToDelete(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-bold text-zinc-300 hover:text-white bg-[#1e1e26] hover:bg-[#282834] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 border border-[#2c2c35]"
               >
                 Cancelar
               </button>
@@ -1273,16 +1331,84 @@ export default function PedidosPage() {
                 type="button"
                 onClick={handleConfirmDeleteOrder}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
+                className="flex-1 py-3 text-xs font-black text-white bg-red-600 hover:bg-red-500 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 active:scale-[0.98] disabled:opacity-50"
               >
-                <Trash2 size={13} />
-                {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+                <Trash2 size={15} />
+                {isDeleting ? "Excluindo..." : "Excluir Definitivamente"}
               </button>
             </div>
           </div>
         </div>
       )}
+      {/* MODAL: CATÁLOGO DE SERVIÇOS/MATERIAIS (O.S) */}
+      {isCatalogModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#141418] border border-[#292930] rounded-2xl w-full xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center p-5 border-b border-[#242429]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <BookOpen size={18} className="text-[#FF7A00]" />
+                <span>Serviços e Materiais Salvos</span>
+              </div>
+              <button
+                onClick={() => setIsCatalogModalOpen(false)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 border-b border-[#242429] bg-[#0e0e11]">
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar serviço (ex: tomada, disjuntor, chuveiro)..."
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  className="w-full bg-[#141418] border border-[#28282e] rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#FF7A00]"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="p-4 max-h-[50vh] overflow-y-auto space-y-2">
+              {filteredCatalog.length > 0 ? (
+                filteredCatalog.map(item => (
+                  <div
+                    key={item.id}
+                    onClick={() => handleSelectFromCatalogForDirect(item)}
+                    className="p-3 bg-[#0e0e11] hover:bg-[#181820] border border-[#242429] hover:border-[#FF7A00]/50 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 group"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white group-hover:text-[#FF7A00] transition-colors">{item.name}</span>
+                        <span className="px-2 py-0.5 bg-[#1f1f28] text-zinc-400 text-[10px] rounded font-medium">
+                          {item.category}
+                        </span>
+                      </div>
+                      {item.description && (
+                        <p className="text-[11px] text-zinc-400 mt-0.5">{item.description}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-bold text-[#FF7A00] font-mono">
+                        R$ {formatCurrency(item.unitPrice)}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-10">
+                  <p className="text-zinc-500 text-xs mb-3">Nenhum serviço/material encontrado no catálogo.</p>
+                  <a href="/configuracoes" className="px-4 py-2 bg-[#181820] hover:bg-[#202028] text-white text-xs font-bold rounded-lg transition-colors border border-[#27272a] inline-block">
+                    Cadastrar Novo Item no Catálogo
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </Portal>
+
     </>
   );
 }

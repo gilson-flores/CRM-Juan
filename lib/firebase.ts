@@ -102,7 +102,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
  * Combinando prazo de validade, forma de pagamento, dados PIX e termos registrados
  */
 export function buildBudgetObservations(params: {
-  validityDays?: number;
+  validityDays?: number | string;
   paymentMethod?: string;
   companySettings?: Partial<CompanySettings>;
   isOrder?: boolean;
@@ -119,7 +119,8 @@ export function buildBudgetObservations(params: {
       lines.push(`• Chave PIX (${settings.pixType || 'PIX'}): ${settings.pixKey}${settings.pixHolder ? ` - Titular: ${settings.pixHolder}` : ''}`);
     }
   } else {
-    const days = params.validityDays || settings.defaultValidityDays || 15;
+    const parsedDays = params.validityDays !== undefined ? Number(params.validityDays) : undefined;
+    const days = (parsedDays && !isNaN(parsedDays)) ? parsedDays : (settings.defaultValidityDays || 15);
     lines.push(`• Orçamento válido por ${days} dias corridos.`);
 
     if (params.paymentMethod) {
@@ -312,7 +313,7 @@ export const saveCompanySettings = async (settings: CompanySettings): Promise<bo
   try {
     localStorage.setItem('@jc-eletricista:company_settings', JSON.stringify(settings));
     const docRef = doc(db, 'company_settings', 'main');
-    await setDoc(docRef, settings, { merge: true });
+    await setDoc(docRef, sanitizeData(settings), { merge: true });
     return true;
   } catch (e) {
     console.error('Error saving company settings to Firestore:', e);
@@ -320,12 +321,31 @@ export const saveCompanySettings = async (settings: CompanySettings): Promise<bo
   }
 };
 
+// ================= HELPER =================
+export const sanitizeData = (obj: any): any => {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeData);
+  }
+  const sanitized: any = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      if (obj[key] !== undefined) {
+        sanitized[key] = sanitizeData(obj[key]);
+      }
+    }
+  }
+  return sanitized;
+};
+
 // ================= QUOTES (ORÇAMENTOS) =================
 export const saveQuoteToFirestore = async (quote: any): Promise<boolean> => {
   if (!quote || !quote.id) return false;
   try {
     const docRef = doc(db, 'quotes', String(quote.id));
-    await setDoc(docRef, quote, { merge: true });
+    await setDoc(docRef, sanitizeData(quote), { merge: true });
     return true;
   } catch (e) {
     console.error('Error saving quote to Firestore:', e);
@@ -350,7 +370,7 @@ export const saveClientToFirestore = async (client: any): Promise<boolean> => {
   if (!client || !client.id) return false;
   try {
     const docRef = doc(db, 'clients', String(client.id));
-    await setDoc(docRef, client, { merge: true });
+    await setDoc(docRef, sanitizeData(client), { merge: true });
     return true;
   } catch (e) {
     console.error('Error saving client to Firestore:', e);
@@ -375,7 +395,7 @@ export const saveCatalogItemToFirestore = async (item: any): Promise<boolean> =>
   if (!item || !item.id) return false;
   try {
     const docRef = doc(db, 'catalog', String(item.id));
-    await setDoc(docRef, item, { merge: true });
+    await setDoc(docRef, sanitizeData(item), { merge: true });
     return true;
   } catch (e) {
     console.error('Error saving catalog item to Firestore:', e);
@@ -402,7 +422,7 @@ export const syncAllLocalDataToFirestore = async (): Promise<{ success: boolean;
     const clientsList = savedClients ? JSON.parse(savedClients) : [];
     for (const client of clientsList) {
       if (client.id) {
-        await setDoc(doc(db, 'clients', String(client.id)), client, { merge: true });
+        await setDoc(doc(db, 'clients', String(client.id)), sanitizeData(client), { merge: true });
       }
     }
 
@@ -410,7 +430,7 @@ export const syncAllLocalDataToFirestore = async (): Promise<{ success: boolean;
     const quotesList = savedQuotes ? JSON.parse(savedQuotes) : [];
     for (const quote of quotesList) {
       if (quote.id) {
-        await setDoc(doc(db, 'quotes', String(quote.id)), quote, { merge: true });
+        await setDoc(doc(db, 'quotes', String(quote.id)), sanitizeData(quote), { merge: true });
       }
     }
 
@@ -418,14 +438,14 @@ export const syncAllLocalDataToFirestore = async (): Promise<{ success: boolean;
     const catalogList = savedCatalog ? JSON.parse(savedCatalog) : [];
     for (const item of catalogList) {
       if (item.id) {
-        await setDoc(doc(db, 'catalog', String(item.id)), item, { merge: true });
+        await setDoc(doc(db, 'catalog', String(item.id)), sanitizeData(item), { merge: true });
       }
     }
 
     const savedSettings = localStorage.getItem('@jc-eletricista:company_settings');
     if (savedSettings) {
       const parsed = JSON.parse(savedSettings);
-      await setDoc(doc(db, 'company_settings', 'main'), parsed, { merge: true });
+      await setDoc(doc(db, 'company_settings', 'main'), sanitizeData(parsed), { merge: true });
     }
 
     return { 
