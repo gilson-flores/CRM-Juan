@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
+import { UserPlus, Filter, ArrowUpDown, Download, X, Edit, Trash2, Cloud, ExternalLink, RefreshCw, AlertTriangle, Search, Loader2, MapPin } from 'lucide-react';
 import { useGoogleSheets } from '@/hooks/useGoogleSheets';
 import { db } from '@/lib/firebase';
 import { collection, doc, deleteDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { Portal } from '@/components/ui/Portal';
+import { fetchAddressByCep, formatCep } from '@/lib/viaCep';
 
 export type Client = {
   id: string;
@@ -19,6 +20,9 @@ export type Client = {
   address: string;
   number: string;
   complement: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
   createdAt: string;
 };
 
@@ -43,6 +47,8 @@ export default function ClientesPage() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  const [isLoadingCep, setIsLoadingCep] = useState(false);
+
   const [formData, setFormData] = useState({
     type: 'pf' as 'pf' | 'pj',
     name: '',
@@ -52,8 +58,41 @@ export default function ClientesPage() {
     cep: '',
     address: '',
     number: '',
-    complement: ''
+    complement: '',
+    neighborhood: '',
+    city: '',
+    state: ''
   });
+
+  const handleCepChange = async (val: string) => {
+    const formatted = formatCep(val);
+    setFormData(prev => ({ ...prev, cep: formatted }));
+    
+    const clean = val.replace(/\D/g, '');
+    if (clean.length === 8) {
+      setIsLoadingCep(true);
+      const res = await fetchAddressByCep(clean);
+      setIsLoadingCep(false);
+      if (res) {
+        setFormData(prev => ({
+          ...prev,
+          cep: res.cep || formatted,
+          address: res.logradouro || prev.address,
+          complement: res.complemento || prev.complement,
+          neighborhood: res.bairro || prev.neighborhood,
+          city: res.localidade || prev.city,
+          state: res.uf || prev.state,
+        }));
+        showNotification('Endereço preenchido automaticamente pelo CEP!', 'success');
+        // Auto focus number field
+        setTimeout(() => {
+          document.getElementById('client-number-input')?.focus();
+        }, 100);
+      } else {
+        showNotification('CEP não localizado. Preencha o endereço manualmente.', 'info');
+      }
+    }
+  };
 
   // Load data from localStorage on mount (Client-side only to avoid SSR hydration mismatch)
   useEffect(() => {
@@ -180,10 +219,13 @@ export default function ClientesPage() {
       doc: client.doc,
       phone: client.phone,
       email: client.email,
-      cep: client.cep,
-      address: client.address,
-      number: client.number,
-      complement: client.complement
+      cep: client.cep || '',
+      address: client.address || '',
+      number: client.number || '',
+      complement: client.complement || '',
+      neighborhood: client.neighborhood || '',
+      city: client.city || '',
+      state: client.state || ''
     });
     setEditingId(client.id);
     setModalOpen(true);
@@ -221,7 +263,20 @@ export default function ClientesPage() {
   const closeModal = () => {
     setModalOpen(false);
     setEditingId(null);
-    setFormData({ type: 'pf', name: '', doc: '', phone: '', email: '', cep: '', address: '', number: '', complement: '' });
+    setFormData({ 
+      type: 'pf', 
+      name: '', 
+      doc: '', 
+      phone: '', 
+      email: '', 
+      cep: '', 
+      address: '', 
+      number: '', 
+      complement: '',
+      neighborhood: '',
+      city: '',
+      state: ''
+    });
   };
 
   const totalClients = clients.length;
@@ -449,48 +504,109 @@ export default function ClientesPage() {
                 </div>
 
                 <div className="border-t border-outline-variant pt-6 mt-6">
-                  <h3 className="text-lg font-bold text-on-surface mb-4">Endereço Principal</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-base font-bold text-on-surface flex items-center gap-2">
+                      <MapPin size={18} className="text-primary" />
+                      Endereço &amp; Localização
+                    </h3>
+                    <span className="text-[10px] text-primary font-bold">Busca automática por CEP</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                    {/* Campo CEP */}
                     <div className="md:col-span-2">
-                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">CEP</label>
-                      <input 
-                        type="text" 
-                        placeholder="00000-000" 
-                        value={formData.cep}
-                        onChange={(e) => setFormData({...formData, cep: e.target.value})}
-                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
-                      />
+                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>CEP</span>
+                        {isLoadingCep && <span className="text-[10px] text-primary animate-pulse flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Buscando...</span>}
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          placeholder="00000-000" 
+                          value={formData.cep}
+                          maxLength={9}
+                          onChange={(e) => handleCepChange(e.target.value)}
+                          className="w-full bg-surface-container-high border border-outline-variant rounded p-3 pr-9 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors font-mono" 
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none">
+                          {isLoadingCep ? <Loader2 size={16} className="animate-spin text-primary" /> : <Search size={16} />}
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Logradouro / Rua */}
                     <div className="md:col-span-4">
-                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Logradouro *</label>
+                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Logradouro / Rua *</label>
                       <input 
                         type="text" 
                         required
-                        placeholder="Rua, Avenida, etc" 
+                        placeholder="Rua, Avenida, Servidão, etc." 
                         value={formData.address}
                         onChange={(e) => setFormData({...formData, address: e.target.value})}
                         className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
                       />
                     </div>
+
+                    {/* Número */}
                     <div className="md:col-span-2">
                       <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Número *</label>
                       <input 
+                        id="client-number-input"
                         type="text"
                         required 
-                        placeholder="123" 
+                        placeholder="Ex: 120" 
                         value={formData.number}
                         onChange={(e) => setFormData({...formData, number: e.target.value})}
-                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
+                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors font-mono" 
                       />
                     </div>
+
+                    {/* Complemento */}
                     <div className="md:col-span-4">
                       <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Complemento</label>
                       <input 
                         type="text" 
-                        placeholder="Apto, Bloco, Sala" 
+                        placeholder="Apto, Bloco, Sala, Galpão..." 
                         value={formData.complement}
                         onChange={(e) => setFormData({...formData, complement: e.target.value})}
                         className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
+                      />
+                    </div>
+
+                    {/* Bairro */}
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Bairro</label>
+                      <input 
+                        type="text" 
+                        placeholder="Bairro" 
+                        value={formData.neighborhood || ''}
+                        onChange={(e) => setFormData({...formData, neighborhood: e.target.value})}
+                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
+                      />
+                    </div>
+
+                    {/* Cidade */}
+                    <div className="md:col-span-3">
+                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">Cidade</label>
+                      <input 
+                        type="text" 
+                        placeholder="Cidade" 
+                        value={formData.city || ''}
+                        onChange={(e) => setFormData({...formData, city: e.target.value})}
+                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" 
+                      />
+                    </div>
+
+                    {/* Estado / UF */}
+                    <div className="md:col-span-1">
+                      <label className="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">UF</label>
+                      <input 
+                        type="text" 
+                        placeholder="SC" 
+                        maxLength={2}
+                        value={formData.state || ''}
+                        onChange={(e) => setFormData({...formData, state: e.target.value.toUpperCase()})}
+                        className="w-full bg-surface-container-high border border-outline-variant rounded p-3 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors uppercase font-mono text-center" 
                       />
                     </div>
                   </div>

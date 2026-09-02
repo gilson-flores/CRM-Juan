@@ -33,7 +33,15 @@ import {
 import type { Client } from '../clientes/page';
 import { useGoogleSheets, CatalogItem } from '@/hooks/useGoogleSheets';
 import { generateQuotePdf } from '@/lib/generatePdf';
-import { db, saveQuoteToFirestore, deleteQuoteFromFirestore, DEFAULT_PAYMENT_METHODS } from '@/lib/firebase';
+import { 
+  db, 
+  saveQuoteToFirestore, 
+  deleteQuoteFromFirestore, 
+  DEFAULT_PAYMENT_METHODS, 
+  DEFAULT_COMPANY_SETTINGS, 
+  buildBudgetObservations, 
+  type CompanySettings 
+} from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { logger } from '@/lib/logger';
 import { getAssetUrl } from '@/lib/assetHelper';
@@ -89,9 +97,16 @@ export default function OrcamentosPage() {
   const [paymentMethod, setPaymentMethod] = useState('PIX (À Vista)');
   const [validityDays, setValidityDays] = useState<number>(15);
   const [registeredPaymentMethods, setRegisteredPaymentMethods] = useState<string[]>(DEFAULT_PAYMENT_METHODS);
-  const [observations, setObservations] = useState(
-    '• Orçamento válido por 15 dias corridos.\n• Garantia sobre os serviços executados.\n• Materiais por conta do contratante, salvo acordo prévio.'
-  );
+  const [companySettings, setCompanySettings] = useState<CompanySettings>(DEFAULT_COMPANY_SETTINGS);
+
+  const computedObservations = useMemo(() => {
+    return buildBudgetObservations({
+      validityDays,
+      paymentMethod,
+      companySettings,
+      isOrder: false
+    });
+  }, [validityDays, paymentMethod, companySettings]);
 
   const { syncAllData, isConnected } = useGoogleSheets();
   const [savedDrafts, setSavedDrafts] = useState<FullDraft[]>([]);
@@ -179,6 +194,7 @@ export default function OrcamentosPage() {
       if (savedSettings) {
         try {
           const parsedSettings = JSON.parse(savedSettings);
+          setCompanySettings(parsedSettings);
           if (parsedSettings.paymentMethods && Array.isArray(parsedSettings.paymentMethods) && parsedSettings.paymentMethods.length > 0) {
             setRegisteredPaymentMethods(parsedSettings.paymentMethods);
           }
@@ -188,11 +204,6 @@ export default function OrcamentosPage() {
           if (parsedSettings.defaultValidityDays) {
             setValidityDays(Number(parsedSettings.defaultValidityDays) || 15);
           }
-          let defaultText = parsedSettings.defaultObservations || '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra.\n• Materiais por conta do contratante, salvo acordo prévio.';
-          if (parsedSettings.pixKey && !defaultText.includes(parsedSettings.pixKey)) {
-            defaultText += `\n• Chave PIX (${parsedSettings.pixType || 'Chave'}): ${parsedSettings.pixKey} [${parsedSettings.pixHolder || parsedSettings.ownerName || 'JC Eletricista'}]`;
-          }
-          setObservations(defaultText);
         } catch {}
       }
 
@@ -264,11 +275,22 @@ export default function OrcamentosPage() {
       }
     }, (err) => console.warn('Firestore catalog listener:', err));
 
+    const unsubSettings = onSnapshot(collection(db, 'company_settings'), (snapshot) => {
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data() as CompanySettings;
+        setCompanySettings(data);
+        if (data.paymentMethods && Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0) {
+          setRegisteredPaymentMethods(data.paymentMethods);
+        }
+      }
+    }, (err) => console.warn('Firestore settings listener:', err));
+
     return () => {
       clearTimeout(timer);
       unsubQuotes();
       unsubClients();
       unsubCatalog();
+      unsubSettings();
     };
   }, []);
 
@@ -339,7 +361,7 @@ export default function OrcamentosPage() {
       address,
       items,
       discount,
-      observations,
+      observations: computedObservations,
       paymentMethod,
       validityDays,
       total,
@@ -403,7 +425,6 @@ export default function OrcamentosPage() {
     setQuoteNumber(draft.quoteNumber || '2026-0001');
     setItems(draft.items || []);
     setDiscount(draft.discount || 0);
-    setObservations(draft.observations || '');
     if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
     if (draft.validityDays) setValidityDays(Number(draft.validityDays) || 15);
     setIsDraftsModalOpen(false);
@@ -524,8 +545,6 @@ export default function OrcamentosPage() {
     }
 
     const clientData = clients.find(c => c.name === selectedClient);
-    const localSettings = localStorage.getItem('@jc-eletricista:company_settings');
-    const companySettings = localSettings ? JSON.parse(localSettings) : undefined;
 
     await generateQuotePdf({
       quoteNumber,
@@ -539,7 +558,7 @@ export default function OrcamentosPage() {
       subtotal,
       discount,
       total,
-      observations,
+      observations: computedObservations,
       paymentMethod,
       validityDays,
       companySettings,
@@ -556,7 +575,7 @@ export default function OrcamentosPage() {
     let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', paymentMethod, validityDays };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', observations: computedObservations, paymentMethod, validityDays };
       updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
       quoteToSave = {
@@ -566,7 +585,7 @@ export default function OrcamentosPage() {
         address,
         items,
         discount,
-        observations,
+        observations: computedObservations,
         paymentMethod,
         validityDays,
         total,
@@ -594,7 +613,7 @@ export default function OrcamentosPage() {
     let quoteToSave: FullDraft;
     
     if (existingDraftIndex >= 0) {
-      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', paymentMethod, validityDays };
+      quoteToSave = { ...updatedDrafts[existingDraftIndex], status: 'enviado', observations: computedObservations, paymentMethod, validityDays };
       updatedDrafts[existingDraftIndex] = quoteToSave;
     } else {
       quoteToSave = {
@@ -604,7 +623,7 @@ export default function OrcamentosPage() {
         address,
         items,
         discount,
-        observations,
+        observations: computedObservations,
         paymentMethod,
         validityDays,
         total,
@@ -938,24 +957,23 @@ export default function OrcamentosPage() {
             </div>
           </section>
 
-          {/* Observations */}
+          {/* Observações & Condições Comerciais Geradas Automaticamente */}
           <section className="bg-[#0e0e11] rounded-2xl border border-[#202028] p-5 shadow-lg space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                 <AlignLeft className="text-[#FF7A00]" size={16} />
-                Observações & Condições de Pagamento
+                Observações & Condições do Orçamento
               </h2>
-              <span className="text-[10px] text-zinc-500 font-mono">
-                Texto incluído no PDF / Prévia
+              <span className="text-[10px] bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/25 font-mono px-2 py-0.5 rounded-full font-bold">
+                Geradas Automaticamente
               </span>
             </div>
-            <textarea 
-              rows={4}
-              value={observations}
-              onChange={(e) => setObservations(e.target.value)}
-              className="w-full bg-[#141418] border border-[#262630] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/30 transition-all placeholder:text-zinc-500 leading-relaxed font-sans resize-y" 
-              placeholder="Validade do orçamento, prazos, formas de pagamento, garantia..."
-            />
+            <div className="bg-[#141418] border border-[#262630] rounded-xl p-3.5 text-xs text-zinc-300 font-sans leading-relaxed whitespace-pre-line">
+              {computedObservations}
+            </div>
+            <p className="text-[10px] text-zinc-500">
+              * Informações geradas automaticamente com base na validade, forma de pagamento, dados PIX e termos registrados em Configurações.
+            </p>
           </section>
 
           {/* Opção de Termo de Garantia no Orçamento */}
@@ -1131,10 +1149,10 @@ export default function OrcamentosPage() {
                   </div>
 
                   {/* Observations & Terms */}
-                  {observations && (
+                  {computedObservations && (
                     <div className="mb-3 pt-2 border-t border-gray-200 text-[8px] text-gray-600 leading-tight">
                       <p className="font-bold uppercase text-gray-400 mb-0.5">Observações & Condições:</p>
-                      <p className="whitespace-pre-line">{observations}</p>
+                      <p className="whitespace-pre-line">{computedObservations}</p>
                     </div>
                   )}
                 </div>

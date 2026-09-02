@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { CompanySettings } from './firebase';
+import { type CompanySettings, buildBudgetObservations } from './firebase';
 import { logger } from './logger';
 import { getAssetUrl } from './assetHelper';
 
@@ -296,11 +296,16 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
   doc.text(`${isOrder ? 'O.S. Nº:' : 'Nº:'} ${data.quoteNumber || '2026-001'}`, 196, 25, { align: 'right' });
   doc.text(`Data: ${data.date || new Date().toLocaleDateString('pt-BR')}`, 196, 31, { align: 'right' });
   
-  const validityDaysValue = data.validityDays || company.defaultValidityDays || 15;
-  const validityLabel = isOrder ? `Prazo: ${validityDaysValue} dias` : `Validade: ${validityDaysValue} dias`;
-  doc.setFontSize(8.5);
-  doc.setTextColor(...primaryOrange);
-  doc.text(validityLabel, 196, 37, { align: 'right' });
+  if (!isOrder) {
+    const validityDaysValue = data.validityDays || company.defaultValidityDays || 15;
+    doc.setFontSize(8.5);
+    doc.setTextColor(...primaryOrange);
+    doc.text(`Validade: ${validityDaysValue} dias`, 196, 37, { align: 'right' });
+  } else {
+    doc.setFontSize(8.5);
+    doc.setTextColor(...primaryOrange);
+    doc.text(`Documento de Execução`, 196, 37, { align: 'right' });
+  }
 
   // Client Info Box
   let y = 54;
@@ -423,15 +428,16 @@ export const generateQuotePdf = async (data: PdfQuoteData) => {
     doc.text(`R$ ${data.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, totalsBoxX + totalsBoxWidth - 6, totalsY + 20, { align: 'right' });
   }
 
-  // Observations Box (Left aligned)
+  // Observations Box (Left aligned) - Gerado automaticamente a partir das configurações registradas
   const obsWidth = 96;
-  let obsContent = (typeof data.observations === 'string' && data.observations.trim().length > 0)
+  const obsContent = (typeof data.observations === 'string' && data.observations.trim().length > 0)
     ? data.observations.trim()
-    : (company.defaultObservations || `• Orçamento válido por ${data.validityDays || company.defaultValidityDays || 15} dias corridos.\n• Garantia de 90 dias sobre a mão de obra.`);
-
-  if (data.paymentMethod && !obsContent.toLowerCase().includes('forma de pagamento')) {
-    obsContent += `\n• Forma de Pagamento: ${data.paymentMethod}`;
-  }
+    : buildBudgetObservations({
+        validityDays: data.validityDays,
+        paymentMethod: data.paymentMethod,
+        companySettings: company,
+        isOrder
+      });
 
   const splitObs = doc.splitTextToSize(obsContent, obsWidth - 8);
   const textHeight = Math.max(splitObs.length * 3.6 + 10, 26);

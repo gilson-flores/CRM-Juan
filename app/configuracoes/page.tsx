@@ -33,7 +33,7 @@ import {
   ListOrdered
 } from 'lucide-react';
 import { useFirebaseData } from '@/hooks/useFirebaseData';
-import { DEFAULT_PAYMENT_METHODS, type CompanySettings } from '@/lib/firebase';
+import { DEFAULT_PAYMENT_METHODS, type CompanySettings, buildBudgetObservations } from '@/lib/firebase';
 
 export default function ConfiguracoesPage() {
   const { 
@@ -540,47 +540,45 @@ export default function ConfiguracoesPage() {
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <FileText size={18} className="text-[#FF7A00]" />
-                Termos, Prazos e Condições Padrão de Serviço
+                Padrões &amp; Termos do Orçamento
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Defina o prazo de validade, forma de pagamento e textos padrão carregados automaticamente nas propostas e ordens de serviço.
+                Defina os parâmetros padrão registrados. As observações de cada orçamento e ordem de serviço são geradas automaticamente a partir dessas opções.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Validade do Orçamento */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Prazo Padrão de Validade */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
                   <Calendar size={13} className="text-[#FF7A00]" />
-                  Prazo de Validade Padrão
+                  Prazo de Validade Padrão do Orçamento
                 </label>
-                <div className="space-y-2">
-                  <select
-                    value={formData.defaultValidityDays}
-                    onChange={(e) => setFormData({ ...formData, defaultValidityDays: parseInt(e.target.value) || 15 })}
-                    className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
-                  >
-                    <option value={5}>5 dias corridos</option>
-                    <option value={7}>7 dias corridos</option>
-                    <option value={10}>10 dias corridos</option>
-                    <option value={15}>15 dias corridos (Recomendado)</option>
-                    <option value={20}>20 dias corridos</option>
-                    <option value={30}>30 dias corridos</option>
-                    <option value={45}>45 dias corridos</option>
-                    <option value={60}>60 dias corridos</option>
-                    <option value={90}>90 dias corridos</option>
-                  </select>
-                  <p className="text-[10px] text-zinc-500">
-                    O orçamento carregará este prazo por padrão com opção de troca rápida no dropdown.
-                  </p>
-                </div>
+                <select
+                  value={formData.defaultValidityDays || 15}
+                  onChange={(e) => setFormData({ ...formData, defaultValidityDays: Number(e.target.value) || 15 })}
+                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                >
+                  <option value={5}>5 dias corridos</option>
+                  <option value={7}>7 dias corridos</option>
+                  <option value={10}>10 dias corridos</option>
+                  <option value={15}>15 dias corridos (Recomendado)</option>
+                  <option value={20}>20 dias corridos</option>
+                  <option value={30}>30 dias corridos</option>
+                  <option value={45}>45 dias corridos</option>
+                  <option value={60}>60 dias corridos</option>
+                  <option value={90}>90 dias corridos</option>
+                </select>
+                <p className="text-[10px] text-zinc-500">
+                  Prazo inicial carregado ao abrir um novo orçamento.
+                </p>
               </div>
 
               {/* Forma de Pagamento Padrão */}
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
                   <CreditCard size={13} className="text-[#FF7A00]" />
-                  Forma de Pagamento Padrão Selecionada
+                  Forma de Pagamento Padrão Pré-Selecionada
                 </label>
                 <select
                   value={formData.defaultPaymentMethod || (formData.paymentMethods?.[0] || 'PIX (À Vista)')}
@@ -591,35 +589,65 @@ export default function ConfiguracoesPage() {
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
-                <p className="text-[10px] text-zinc-500 mt-1">
-                  Pode ser gerenciada e expandida na aba &quot;Pagamento &amp; PIX&quot;.
+                <p className="text-[10px] text-zinc-500">
+                  Gerencie opções adicionais na aba &quot;Pagamento &amp; PIX&quot;.
                 </p>
               </div>
 
-              <div className="md:col-span-3">
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                  Observações e Condições de Pagamento Padrão (aparece na proposta)
+              {/* Política de Fornecimento de Materiais */}
+              <div className="md:col-span-2 space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                  <ShieldCheck size={13} className="text-[#FF7A00]" />
+                  Política de Materiais &amp; Equipamentos
                 </label>
-                <textarea
-                  rows={4}
-                  value={formData.defaultObservations}
-                  onChange={(e) => setFormData({ ...formData, defaultObservations: e.target.value })}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] leading-relaxed"
-                  placeholder="• Orçamento válido por 15 dias corridos..."
+                <input
+                  type="text"
+                  value={formData.materialPolicy || ''}
+                  onChange={(e) => setFormData({ ...formData, materialPolicy: e.target.value })}
+                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00]"
+                  placeholder="Ex: Materiais sob responsabilidade do cliente, salvo prévio acordo contratual."
                 />
+                <p className="text-[10px] text-zinc-500">
+                  Condição padrão incluída automaticamente no rol de observações.
+                </p>
               </div>
 
-              <div className="md:col-span-3">
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+              {/* Termos de Garantia da Mão de Obra */}
+              <div className="md:col-span-2 space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-[#FF7A00]" />
                   Termos de Garantia dos Serviços Prestados
                 </label>
                 <textarea
-                  rows={3}
-                  value={formData.warrantyTerms}
+                  rows={2}
+                  value={formData.warrantyTerms || ''}
                   onChange={(e) => setFormData({ ...formData, warrantyTerms: e.target.value })}
-                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] leading-relaxed"
-                  placeholder="Garantia de 90 dias sobre a mão de obra..."
+                  className="w-full bg-[#141418] border border-[#27272e] rounded-xl p-3.5 text-xs text-zinc-200 focus:outline-none focus:border-[#FF7A00] leading-relaxed resize-y"
+                  placeholder="Ex: Garantia de 90 dias sobre a mão de obra executada conforme normas ABNT NBR 5410 & NR-10."
                 />
+                <p className="text-[10px] text-zinc-500">
+                  Texto utilizado especificamente no anexo de Termo de Garantia Técnica.
+                </p>
+              </div>
+
+              {/* Prévia das Observações Geradas */}
+              <div className="md:col-span-2 bg-[#141418] border border-[#222228] rounded-xl p-4 space-y-2 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles size={12} className="text-[#FF7A00]" />
+                    Composição Automática das Observações (Prévia do Orçamento / PDF)
+                  </span>
+                  <span className="text-[10px] bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/30 font-medium px-2 py-0.5 rounded-full">
+                    Gerado Dinamicamente
+                  </span>
+                </div>
+                <div className="bg-[#0c0c0e] border border-[#1e1e24] rounded-lg p-3 text-xs text-zinc-300 whitespace-pre-line font-mono leading-relaxed">
+                  {buildBudgetObservations({
+                    validityDays: formData.defaultValidityDays || 15,
+                    paymentMethod: formData.defaultPaymentMethod || 'PIX (À Vista)',
+                    companySettings: formData
+                  })}
+                </div>
               </div>
             </div>
           </div>

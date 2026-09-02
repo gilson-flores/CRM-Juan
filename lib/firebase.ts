@@ -56,7 +56,8 @@ export type CompanySettings = {
   pixType: string;
   pixHolder: string;
   defaultValidityDays: number;
-  defaultObservations: string;
+  defaultObservations?: string;
+  materialPolicy?: string;
   warrantyTerms: string;
   allowRegistrations?: boolean;
   adminAuthKey?: string;
@@ -87,13 +88,54 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   pixType: 'Telefone',
   pixHolder: 'JC Eletricista',
   defaultValidityDays: 15,
-  defaultObservations: '• Orçamento válido por 15 dias corridos.\n• Garantia de 90 dias sobre a mão de obra executada.\n• Materiais sob responsabilidade do cliente, salvo prévio acordo contratual.\n• Pagamento facilitado via PIX ou Cartão em até 12x.',
-  warrantyTerms: 'Garantia legal de 90 dias em conformidade com o Código de Defesa do Consumidor para todos os serviços elétricos prestados.',
+  defaultObservations: '',
+  materialPolicy: 'Materiais sob responsabilidade do cliente, salvo prévio acordo contratual.',
+  warrantyTerms: 'Garantia de 90 dias sobre a mão de obra executada conforme normas ABNT NBR 5410 & NR-10.',
   allowRegistrations: true,
   adminAuthKey: 'Davi',
   paymentMethods: DEFAULT_PAYMENT_METHODS,
   defaultPaymentMethod: 'PIX (À Vista)'
 };
+
+/**
+ * Construtor automático de observações e condições comerciais do orçamento
+ * Combinando prazo de validade, forma de pagamento, dados PIX e termos registrados
+ */
+export function buildBudgetObservations(params: {
+  validityDays?: number;
+  paymentMethod?: string;
+  companySettings?: Partial<CompanySettings>;
+  isOrder?: boolean;
+}): string {
+  const settings = params.companySettings || {};
+  const lines: string[] = [];
+
+  if (params.isOrder) {
+    lines.push('• Serviços executados conforme normas técnicas ABNT NBR 5410 & NR-10.');
+    if (params.paymentMethod) {
+      lines.push(`• Forma de Pagamento: ${params.paymentMethod}`);
+    }
+    if (settings.pixKey) {
+      lines.push(`• Chave PIX (${settings.pixType || 'PIX'}): ${settings.pixKey}${settings.pixHolder ? ` - Titular: ${settings.pixHolder}` : ''}`);
+    }
+  } else {
+    const days = params.validityDays || settings.defaultValidityDays || 15;
+    lines.push(`• Orçamento válido por ${days} dias corridos.`);
+
+    if (params.paymentMethod) {
+      lines.push(`• Forma de Pagamento: ${params.paymentMethod}`);
+    }
+
+    if (settings.pixKey) {
+      lines.push(`• Chave PIX (${settings.pixType || 'PIX'}): ${settings.pixKey}${settings.pixHolder ? ` - Titular: ${settings.pixHolder}` : ''}`);
+    }
+
+    const material = settings.materialPolicy || 'Materiais sob responsabilidade do cliente, salvo prévio acordo contratual.';
+    lines.push(`• ${material}`);
+  }
+
+  return lines.join('\n');
+}
 
 // ================= AUTHENTICATION =================
 export const loginWithGoogle = async (): Promise<User | null> => {
